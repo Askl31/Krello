@@ -37,6 +37,9 @@ function safeCover(coverJson) {
   try {
     const c = JSON.parse(coverJson);
     if (c.type === 'color') return `<div class="cover" style="background:${escapeHtml(c.value)}"></div>`;
+    if (c.type === 'attachment' && c.value) {
+      return `<img class="cover" src="/api/v1/attachments/${encodeURIComponent(c.value)}/download" alt="" loading="lazy" />`;
+    }
   } catch { /* ignore */ }
   return '';
 }

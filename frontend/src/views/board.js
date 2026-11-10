@@ -1,7 +1,7 @@
 // Vue Kanban : listes + cartes, drag & drop, quick add, WIP.
 
 import { api } from '../api.js';
-import { escapeHtml } from '../format.js';
+import { escapeHtml, PRIORITY_META } from '../format.js';
 import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
 import { draggable, activeDrag } from '../dnd.js';
 import { toast, promptDialog } from '../ui/modal.js';
@@ -13,10 +13,63 @@ let host = null;
 export function renderBoard() {
   host = document.querySelector('.view');
   host.innerHTML = `
+    <div class="filters" id="board-filters"></div>
     <div class="board-scroller">
       <div class="board" id="board"></div>
     </div>`;
+  renderFilters();
+  renderLists();
+}
+
+function renderFilters() {
+  const bar = host.querySelector('#board-filters');
+  const f = state.filters;
+  const visible = visibleLists().reduce((s, l) => s + cardsOfList(l.id).length, 0);
+  const total = state.cards.filter((c) => !c.archived).length;
+  const hasFilters = f.text || f.labelId || f.priority || f.due || f.includeArchived;
+  bar.innerHTML = `
+    <span class="flabel">Filtres</span>
+    <input class="input" id="f-text" placeholder="Titre ou description…" value="${escapeHtml(f.text)}" />
+    <select class="input" id="f-label">
+      <option value="">Tous les labels</option>
+      ${state.labels.map((l) => `<option value="${l.id}" ${f.labelId === l.id ? 'selected' : ''}>${escapeHtml(l.name || '•')}</option>`).join('')}
+    </select>
+    <select class="input" id="f-priority">
+      <option value="">Toutes priorités</option>
+      ${Object.entries(PRIORITY_META).filter(([k]) => k !== 'none')
+        .map(([k, v]) => `<option value="${k}" ${f.priority === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+    </select>
+    <select class="input" id="f-due">
+      <option value="">Échéances…</option>
+      <option value="overdue" ${f.due === 'overdue' ? 'selected' : ''}>En retard</option>
+      <option value="week" ${f.due === 'week' ? 'selected' : ''}>≤ 7 jours</option>
+    </select>
+    <label class="row" style="gap:5px;flex:none"><input type="checkbox" id="f-archived" ${f.includeArchived ? 'checked' : ''} style="width:14px;height:14px" /><span class="flabel">Archivés</span></label>
+    ${hasFilters ? '<button class="iconbtn" id="f-reset" title="Réinitialiser les filtres" style="width:26px;height:26px;font-size:12px">✕</button>' : ''}
+    <span class="fcount">${visible}/${total} cartes affichées</span>`;
+
+  bar.querySelector('#f-text').addEventListener('input', (e) => {
+    state.filters.text = e.target.value;
+    const pos = e.target.selectionStart;
+    renderLists();
+    const again = host.querySelector('#f-text');
+    again.focus();
+    again.setSelectionRange(pos, pos);
+  });
+  bar.querySelector('#f-label').addEventListener('change', (e) => { state.filters.labelId = e.target.value || null; renderLists(); });
+  bar.querySelector('#f-priority').addEventListener('change', (e) => { state.filters.priority = e.target.value || null; renderLists(); });
+  bar.querySelector('#f-due').addEventListener('change', (e) => { state.filters.due = e.target.value || null; renderLists(); });
+  bar.querySelector('#f-archived').addEventListener('change', (e) => { state.filters.includeArchived = e.target.checked; renderFilters(); renderLists(); });
+  bar.querySelector('#f-reset')?.addEventListener('click', () => {
+    state.filters = { text: '', labelId: null, priority: null, due: null, includeArchived: false };
+    renderFilters();
+    renderLists();
+  });
+}
+
+function renderLists() {
   const board = host.querySelector('#board');
+  board.innerHTML = '';
 
   for (const list of visibleLists()) {
     board.appendChild(listEl(list));
@@ -34,6 +87,36 @@ export function renderBoard() {
     } catch (e) { toast(e.message, 'err'); }
   };
   board.appendChild(addList);
+  updateFilterBar();
+}
+
+/** Met à jour compteur + bouton reset sans reconstruire la barre (focus conservé). */
+function updateFilterBar() {
+  const bar = host.querySelector('#board-filters');
+  if (!bar) return;
+  const f = state.filters;
+  const visible = visibleLists().reduce((s, l) => s + cardsOfList(l.id).length, 0);
+  const total = state.cards.filter((c) => !c.archived).length;
+  const count = bar.querySelector('.fcount');
+  if (count) count.textContent = `${visible}/${total} cartes affichées`;
+  const hasFilters = !!(f.text || f.labelId || f.priority || f.due || f.includeArchived);
+  let reset = bar.querySelector('#f-reset');
+  if (hasFilters && !reset) {
+    reset = document.createElement('button');
+    reset.className = 'iconbtn';
+    reset.id = 'f-reset';
+    reset.title = 'Réinitialiser les filtres';
+    reset.style.cssText = 'width:26px;height:26px;font-size:12px';
+    reset.textContent = '✕';
+    reset.addEventListener('click', () => {
+      state.filters = { text: '', labelId: null, priority: null, due: null, includeArchived: false };
+      renderFilters();
+      renderLists();
+    });
+    count?.before(reset);
+  } else if (!hasFilters && reset) {
+    reset.remove();
+  }
 }
 
 function listEl(list) {

@@ -102,6 +102,14 @@ impl Service {
         Ok(())
     }
 
+    pub fn get_attachment(&self, id: &str) -> Result<Attachment> {
+        let db = self.lock_db()?;
+        db.conn
+            .query_row("SELECT * FROM attachments WHERE id=?1", [id], row_attachment)
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("attachment {id}")))
+    }
+
     pub fn list_attachments(&self, card_id: &str) -> Result<Vec<Attachment>> {
         let db = self.lock_db()?;
         let mut stmt =

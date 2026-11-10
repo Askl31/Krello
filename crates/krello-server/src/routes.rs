@@ -433,11 +433,7 @@ async fn list_attachments(State(state): State<SharedState>, Path(id): Path<Strin
 }
 
 async fn download_attachment(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
-    let atts = state.service.list_attachments(&id).map_err(ApiError)?;
-    let att = atts
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| ApiError(krello_core::Error::NotFound(format!("attachment {id}"))))?;
+    let att = state.service.get_attachment(&id).map_err(ApiError)?;
     let data = state.service.read_attachment_file(&att.stored_path).map_err(ApiError)?;
     Ok((
         [
@@ -455,12 +451,7 @@ async fn delete_attachment(State(state): State<SharedState>, Path(id): Path<Stri
 }
 
 async fn set_attachment_cover(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
-    let atts = state.service.list_attachments(&id).map_err(ApiError)?;
-    let att = atts
-        .iter()
-        .find(|a| a.id == id)
-        .ok_or_else(|| ApiError(krello_core::Error::NotFound(format!("attachment {id}"))))?
-        .clone();
+    let att = state.service.get_attachment(&id).map_err(ApiError)?;
     state.service.set_cover(&att.card_id, &id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
