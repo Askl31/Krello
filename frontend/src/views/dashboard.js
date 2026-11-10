@@ -83,9 +83,13 @@ export function renderDashboard() {
     <div class="panel ai-panel">
       <div class="ai-head"><div class="ai-orb">✨</div><h3 style="margin:0">Résumé IA du board</h3>
         <div style="flex:1"></div>
-        <button class="btn sm primary" id="dash-ai-sum">Générer</button>
+        ${state.aiStatus?.available
+          ? '<button class="btn sm primary" id="dash-ai-sum">Générer</button>'
+          : '<span class="badge muted">IA indisponible sur cette machine</span>'}
       </div>
-      <div id="dash-ai-out" class="muted" style="font-size:13px">Apple Intelligence résume l'avancement, les risques et les échéances critiques.</div>
+      <div id="dash-ai-out" class="muted" style="font-size:13px">${state.aiStatus?.available
+        ? 'Apple Intelligence résume l\'avancement, les risques et les échéances critiques.'
+        : 'Apple Intelligence requiert un Mac Apple Silicon avec l\'option activée (Réglages › Apple Intelligence &amp; Siri). Les données restent 100 % locales quand elle est disponible.'}</div>
     </div>`;
 
   // baselines
@@ -118,7 +122,7 @@ export function renderDashboard() {
     renderDashboard();
   };
 
-  host.querySelector('#dash-ai-sum').onclick = async () => {
+  host.querySelector('#dash-ai-sum')?.addEventListener('click', async () => {
     const out = host.querySelector('#dash-ai-out');
     out.textContent = 'Génération du résumé…';
     try {
@@ -127,5 +131,5 @@ export function renderDashboard() {
     } catch (e) {
       out.textContent = `IA indisponible : ${e.message}`;
     }
-  };
+  });
 }

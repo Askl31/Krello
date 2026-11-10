@@ -28,7 +28,7 @@ export function renderTopbar(host) {
       <div class="viewtabs" id="tb-views">
         ${VIEWS.map(([v, label]) => `<button data-view="${v}" class="${state.view === v ? 'active' : ''}">${label}</button>`).join('')}
       </div>
-      <button class="iconbtn" id="tb-ai" title="Assistant IA (Apple Intelligence)">✨</button>
+      ${state.aiStatus?.available ? '<button class="iconbtn" id="tb-ai" title="Assistant IA (Apple Intelligence)">✨</button>' : ''}
     ` : ''}
     <button class="iconbtn" id="tb-undo" title="Annuler (⌘Z)">↩</button>
     <button class="iconbtn" id="tb-redo" title="Rétablir (⇧⌘Z)">↪</button>

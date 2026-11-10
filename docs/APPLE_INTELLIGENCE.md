@@ -73,7 +73,8 @@ fait que produire la matière première.
 
 | Limite | Traitement |
 |---|---|
-| Machine non éligible / IA désactivée | `/ai/status` renvoie la raison (`device_not_eligible`, `apple_intelligence_not_enabled`, `model_not_ready`, `os_too_old`) ; l'UI masque ✨ et le panneau Dashboard |
+| Machine non éligible / IA désactivée | `/ai/status` renvoie la raison (`device_not_eligible`, `apple_intelligence_not_enabled`, `model_not_ready`, `os_too_old`, `disabled`) ; l'UI **masque** tous les points d'entrée (bouton ✨ de la topbar, menu ✨ de la modale carte, bouton « Générer » du dashboard) via `state.aiStatus` chargé au boot |
+| Désactivation manuelle (macOS) | `krello --no-ai` ou `KRELLO_NO_AI=1` — même comportement que Windows |
 | Windows / Linux | stub vide compilé → même contrat `available: false` ; Aucune divergence d'UI |
 | Sorties non-JSON | extraction du bloc `{…}` + retry correctif unique + erreur typée `ai_unavailable` |
 | Dates ambiguës (« vendredi prochain ») | le prompt fournit la date du jour ; validation `parse_date` côté Rust |

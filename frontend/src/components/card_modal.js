@@ -28,7 +28,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
     const { el, close } = openModal(`
       <div class="modal-head">
         <h2 data-edit="title">${escapeHtml(card.title)}</h2>
-        <button class="iconbtn" id="cm-ai" title="Assistant IA">✨</button>
+        ${state.aiStatus?.available ? '<button class="iconbtn" id="cm-ai" title="Assistant IA">✨</button>' : ''}
         <button class="iconbtn" data-close title="Fermer">✕</button>
       </div>
       <div class="modal-body">

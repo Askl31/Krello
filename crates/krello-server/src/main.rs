@@ -20,11 +20,12 @@ async fn main() {
         )
         .init();
 
-    // Args: --db PATH --port N --token T --frontend DIR --open
+    // Args: --db PATH --port N --token T --frontend DIR --open --no-ai
     let mut db_path = default_db_path();
     let mut port = DEFAULT_PORT;
     let mut open_browser = false;
     let mut token = None;
+    let mut disable_ai = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -34,6 +35,7 @@ async fn main() {
             }
             "--open" => open_browser = true,
             "--token" => token = args.next(),
+            "--no-ai" => disable_ai = true,
             "--frontend" => {
                 if let Some(dir) = args.next() {
                     std::env::set_var("KRELLO_FRONTEND_DIR", dir);
@@ -41,12 +43,20 @@ async fn main() {
             }
             other => {
                 eprintln!(
-                    "Usage: krello [--db PATH] [--port N] [--token T] [--frontend DIR] [--open]\nArgument inconnu: {other}"
+                    "Usage: krello [--db PATH] [--port N] [--token T] [--frontend DIR] [--open] [--no-ai]\nArgument inconnu: {other}"
                 );
                 std::process::exit(2);
             }
         }
     }
+    let ai: Option<std::sync::Arc<dyn krello_core::ai::provider::AiProvider>> =
+        if disable_ai || std::env::var("KRELLO_NO_AI").is_ok() {
+            Some(Arc::new(krello_core::ai::provider::UnavailableProvider {
+                reason: "disabled".into(),
+            }))
+        } else {
+            None
+        };
 
     let db = Db::open(&db_path).unwrap_or_else(|e| {
         eprintln!("Impossible d'ouvrir la base {}: {e}", db_path.display());
@@ -74,7 +84,7 @@ async fn main() {
         });
     }
 
-    let state = make_state(service, token, None);
+    let state = make_state(service, token, ai);
     let mut app = build_router(state);
 
     match frontend_dir() {

@@ -55,6 +55,11 @@ Données : `~/Library/Application Support/com.krello.app/` (macOS),
 `%APPDATA%\Krello\` (Windows). Sécurité : écoute **127.0.0.1 uniquement**,
 `--token` pour ajouter un Bearer.
 
+**Apple Intelligence** : active automatiquement sur Mac éligible (Apple Silicon +
+macOS 15.1+ + Apple Intelligence activée) ; **jamais sur Windows** (helper compilé
+en stub vide → fonctionnalités masquées dans l'UI). Désactivation manuelle sur
+Mac : `krello --no-ai` ou variable `KRELLO_NO_AI=1`.
+
 ## Structure
 
 ```

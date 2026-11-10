@@ -18,6 +18,13 @@ import { loadViewSettings } from './views/view_helpers.js';
 const app = document.getElementById('app');
 applyTheme();
 
+// Statut IA une seule fois au boot : pilote l'affichage des boutons ✨.
+try {
+  state.aiStatus = await api.aiStatus();
+} catch {
+  state.aiStatus = { available: false, reason: 'unreachable' };
+}
+
 function shellHtml() {
   return `
     <div class="topbar" id="topbar"></div>
