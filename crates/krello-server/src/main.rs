@@ -83,13 +83,9 @@ async fn main() {
             app = app.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true));
         }
         None => {
-            tracing::warn!("frontend introuvable — lancez depuis la racine du projet ou utilisez --frontend");
-            app = app.fallback(|| async {
-                (
-                    axum::http::StatusCode::NOT_FOUND,
-                    "Interface non trouvée. Définissez KRELLO_FRONTEND_DIR ou lancez depuis la racine du projet.",
-                )
-            });
+            // Assets embarqués à la compilation (include_dir) — le binaire est autonome.
+            tracing::info!("frontend servi depuis les assets embarqués");
+            app = app.fallback_service(axum::routing::get(krello_server::embedded_frontend_handler));
         }
     }
 

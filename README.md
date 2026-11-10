@@ -76,5 +76,5 @@ Entrée valide quick-add · glisser une carte du Gantt ou du calendrier replanif
 
 ## Tests
 
-53 tests (smoke, cartes/déplacements/undo, CPM+calendriers+baselines, recherche,
+52 tests (smoke, cartes/déplacements/undo, CPM+calendriers+baselines, recherche,
 import/export/automations, IA, intégration HTTP) : `cargo test --workspace`.
