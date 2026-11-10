@@ -167,7 +167,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
             </div>
           </div>
         </div>
-      </div>`);
+      </div>`, { id: 'card-modal' });
 
     bind(el, close);
     return { el, close };
@@ -200,8 +200,23 @@ export async function openCardModal(cardId, { onChange } = {}) {
     comments = d.comments || [];
     attachments = d.attachments || [];
     fieldValues = d.custom_fields || {};
+    // Conserve le texte en cours de saisie dans l'éditeur de description.
+    const descEl = current?.el.querySelector('#cm-desc');
+    const descEditing = descEl && descEl.style.display !== 'none' ? descEl.value : null;
     const scroll = current?.el.scrollTop;
     current = render();
+    if (descEditing !== null) {
+      const nv = current.el.querySelector('#cm-desc');
+      const view = current.el.querySelector('#cm-desc-view');
+      const actions = current.el.querySelector('#cm-desc-actions');
+      if (nv && view && actions) {
+        view.style.display = 'none';
+        nv.style.display = '';
+        actions.style.display = '';
+        nv.value = descEditing;
+        nv.focus();
+      }
+    }
     if (scroll) current.el.scrollTop = scroll;
     notify();
   }

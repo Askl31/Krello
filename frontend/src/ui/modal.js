@@ -20,9 +20,14 @@ export function toast(message, kind = '') {
   }, 3400);
 }
 
-export function openModal(html, { onClose } = {}) {
+export function openModal(html, { onClose, id } = {}) {
+  // Une modale avec le même id remplace l'existante (évite l'empilement).
+  if (id) {
+    document.querySelectorAll(`.modal-backdrop[data-modal-id="${id}"]`).forEach((b) => b.remove());
+  }
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
+  if (id) backdrop.dataset.modalId = id;
   backdrop.innerHTML = `<div class="modal fade-in">${html}</div>`;
   document.getElementById('overlays').appendChild(backdrop);
   const close = () => {
