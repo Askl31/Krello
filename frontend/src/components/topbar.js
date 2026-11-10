@@ -78,6 +78,12 @@ export function initTopbarShortcuts() {
     } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && e.shiftKey) {
       e.preventDefault();
       doRedo();
+    } else if (e.key.toLowerCase() === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // N = carte en langage naturel (IA) — board ouvert requis, IA masquée sinon.
+      if (!state.board || !state.aiStatus?.available) return;
+      if (document.querySelector('.modal-backdrop, .palette-backdrop')) return;
+      e.preventDefault();
+      import('../components/ai_panel.js').then((m) => m.openNaturalCardDialog());
     }
   });
   on('UndoApplied', () => { /* les handlers d'écran réagissent via board events */ });

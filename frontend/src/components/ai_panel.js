@@ -2,7 +2,8 @@
 
 import { api } from '../api.js';
 import { state, loadBoard } from '../state.js';
-import { toast } from '../ui/modal.js';
+import { toast, openModal } from '../ui/modal.js';
+import { escapeHtml } from '../format.js';
 import { on } from '../ws.js';
 
 let drawer = null;
@@ -40,12 +41,8 @@ async function onAction(e) {
   const firstList = state.lists[0];
   try {
     if (act === 'nl') {
-      const input = prompt('Décrivez la tâche en une phrase :', 'Préparer la revue de sprint vendredi prochain, priorité haute');
-      if (!input) return;
-      out.textContent = 'Génération…';
-      const r = await api.aiParseTask(input, firstList.id, true);
-      out.innerHTML = `✅ Carte créée : <b>${r.card.title}</b>${r.parsed.due ? ` · échéance ${r.parsed.due}` : ''}`;
-      await loadBoard(board.id);
+      openNaturalCardDialog();
+      return;
     } else if (act === 'plan') {
       const goal = prompt('Objectif du projet :', 'Organiser un lancement produit en 3 semaines');
       if (!goal) return;
@@ -72,4 +69,76 @@ async function onAction(e) {
     out.textContent = `Erreur : ${err.message}`;
     toast(err.message, 'err');
   }
+}
+
+/**
+ * Dialog « carte en langage naturel » (raccourci N, tiroir ✨).
+ * Gating : IA disponible + board ouvert avec au moins une liste.
+ */
+export function openNaturalCardDialog() {
+  if (!state.aiStatus?.available) {
+    toast('IA indisponible sur cette machine', 'err');
+    return;
+  }
+  if (!state.board || !state.lists.filter((l) => !l.archived).length) {
+    toast('Ouvrez un board avec au moins une liste', 'err');
+    return;
+  }
+  const { el, close } = openModal(`
+    <div class="modal-head"><h2>✨ Nouvelle carte en langage naturel</h2>
+      <button class="iconbtn" data-close title="Fermer">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Décrivez la tâche</label>
+        <textarea class="input" id="nl-input" rows="2"
+          placeholder="Ex. : préparer la revue de sprint vendredi prochain, priorité haute"></textarea>
+      </div>
+      <div class="field"><label>Liste de destination</label>
+        <select class="input" id="nl-list">
+          ${state.lists.filter((l) => !l.archived)
+            .map((l) => `<option value="${l.id}">${escapeHtml(l.title)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="nl-result" class="muted" style="font-size:13px;min-height:18px"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn" data-close>Fermer</button>
+        <button class="btn primary" id="nl-create">Créer (Entrée)</button>
+      </div>
+    </div>`);
+
+  const input = el.querySelector('#nl-input');
+  const result = el.querySelector('#nl-result');
+  const btn = el.querySelector('#nl-create');
+  input.focus();
+
+  const create = async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    btn.disabled = true;
+    btn.textContent = 'Génération…';
+    try {
+      const r = await api.aiParseTask(text, el.querySelector('#nl-list').value, true);
+      const p = r.parsed || {};
+      result.innerHTML = `✅ <b>${escapeHtml(p.title || '?')}</b>`
+        + (p.due ? ` · ⏰ ${escapeHtml(p.due)}` : '')
+        + (p.priority && p.priority !== 'none' ? ` · ▲ ${escapeHtml(p.priority)}` : '')
+        + (p.labels?.length ? ` · ${p.labels.map((l) => escapeHtml(l)).join(', ')}` : '')
+        + (p.checklist?.length ? ` · ☑ ${p.checklist.length} étapes` : '');
+      input.value = '';
+      input.focus();
+      // le board se met à jour tout seul via l'événement WS CardCreated
+    } catch (e) {
+      result.textContent = `Erreur : ${e.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Créer (Entrée)';
+    }
+  };
+
+  btn.addEventListener('click', create);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      create();
+    }
+  });
 }

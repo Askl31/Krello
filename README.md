@@ -99,8 +99,10 @@ docs/APPLE_INTELLIGENCE.md  analyse pertinence/faisabilité + implémentation
 
 ## Raccourcis
 
-`⌘K` palette · `⌘Z` / `⇧⌘Z` undo/redo · `Échap` ferme modales ·
-Entrée valide quick-add · glisser une carte du Gantt ou du calendrier replanifie.
+`⌘K` palette · `⌘Z` / `⇧⌘Z` undo/redo · `N` **nouvelle carte en langage naturel**
+(IA — hors champ de saisie, board ouvert, Apple Intelligence disponible uniquement) ·
+`Échap` ferme modales · Entrée valide quick-add · glisser une carte du Gantt ou du
+calendrier replanifie.
 
 ## Tests
 
@@ -108,6 +110,22 @@ Entrée valide quick-add · glisser une carte du Gantt ou du calendrier replanif
 import/export/automations, IA, intégration HTTP) : `cargo test --workspace`.
 
 ## Journal des modifications
+
+### v0.1.3 — raccourci `N` : carte en langage naturel
+
+- **Touche `N`** (hors champ de saisie, board ouvert) ouvre le dialog
+  « ✨ Nouvelle carte en langage naturel » : description libre + liste de
+  destination → Apple Intelligence extrait **titre, échéance (date résolue),
+  priorité, labels et checklist**, puis crée la carte ; le résultat parsé est
+  affiché dans le dialog et le Kanban se met à jour via l'événement WebSocket.
+- Chaînable : le dialog reste ouvert (« Créer une autre ») pour saisir plusieurs
+  tâches d'affilée.
+- Gating cohérent : `N` est **inopérant sans IA** (Windows, Mac non éligible,
+  `--no-ai`) — aucun dialog, aucune requête ; l'action est aussi absente de la
+  palette ⌘K. Disponible sinon via ✨ → « Carte en langage naturel ».
+- Limite connue : la résolution des dates relatives (« vendredi prochain »)
+  est faite par le modèle on-device et peut varier d'un jour — la date reste
+  éditable sur la carte après création.
 
 ### v0.1.2 — verrouillage Apple Intelligence + fix d'affichage temps réel
 

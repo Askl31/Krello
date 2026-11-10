@@ -62,6 +62,12 @@ function openPalette() {
         run: () => navigate(boardUrl(b.id, 'board')),
       });
     }
+    if (state.board && state.aiStatus?.available) {
+      items.push(
+        { icon: '✨', title: 'Carte en langage naturel', sub: 'N',
+          run: async () => { const m = await import('../components/ai_panel.js'); m.openNaturalCardDialog(); } },
+      );
+    }
     items.push(
       { icon: '＋', title: 'Nouveau board…', run: async () => { const { promptDialog } = await import('./modal.js'); const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Projet Sirius'); if (name) { const b = await api.createBoard({ title: name }); await loadBoards(); navigate(boardUrl(b.id, 'board')); } } },
       { icon: '↩', title: 'Annuler (undo)', run: async () => { const r = await api.undo(); toast(r?.undone ? `Annulé : ${r.undone}` : 'Rien à annuler', r?.undone ? 'ok' : ''); } },
