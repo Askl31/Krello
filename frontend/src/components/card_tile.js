@@ -1,9 +1,10 @@
 // Tuile de carte Kanban + drag & drop.
 
-import { escapeHtml, dueBadge, dueState, priorityBadge, fmtDateShort, progressPct } from '../format.js';
+import { escapeHtml, dueBadge, priorityBadge, progressPct } from '../format.js';
 import { draggable } from '../dnd.js';
 import { state } from '../state.js';
 import { openCardModal } from './card_modal.js';
+import { icon } from '../icons.js';
 
 export function cardTileHtml(card) {
   const labels = (card._label_ids || [])
@@ -11,12 +12,17 @@ export function cardTileHtml(card) {
     .filter(Boolean);
   const pct = card._checklists ? progressPct(card._checklists) : null;
   const cover = card.cover ? safeCover(card.cover) : '';
-  const milestone = card.is_milestone ? '<span class="mini">◆ jalon</span>' : '';
-  const duration = card.duration_days ? `<span class="mini">⏳ ${card.duration_days} j</span>` : '';
+  const milestone = card.is_milestone
+    ? `<span class="badge" style="color:var(--warning);background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning)35%,transparent)">${icon('milestone', { size: 10 })} jalon</span>`
+    : '';
+  const duration = card.duration_days
+    ? `<span class="mini" title="Durée estimée : ${card.duration_days} jours ouvrés">${icon('clock', { size: 11 })} ${card.duration_days}j</span>`
+    : '';
   const counts = [
-    card._comments_count ? `<span class="mini">💬 ${card._comments_count}</span>` : '',
-    card._attachments_count ? `<span class="mini">📎 ${card._attachments_count}</span>` : '',
+    card._comments_count ? `<span class="mini" title="${card._comments_count} commentaire(s)">${icon('comment', { size: 11 })} ${card._comments_count}</span>` : '',
+    card._attachments_count ? `<span class="mini" title="${card._attachments_count} pièce(s) jointe(s)">${icon('attachment', { size: 11 })} ${card._attachments_count}</span>` : '',
   ].join('');
+
   return `
     <div class="card-tile" data-card="${card.id}">
       ${cover}
@@ -27,7 +33,7 @@ export function cardTileHtml(card) {
         ${priorityBadge(card)}
         ${milestone}
         ${duration}
-        ${pct !== null ? `<span class="mini">☑ ${pct}%</span>` : ''}
+        ${pct !== null ? `<span class="badge" style="color:var(--success);background:var(--success-soft);border-color:color-mix(in srgb,var(--success)35%,transparent)">${icon('check', { size: 11 })} ${pct}%</span>` : ''}
         ${counts}
       </div>
     </div>`;

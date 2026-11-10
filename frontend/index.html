@@ -11,10 +11,20 @@
   <div id="app" class="app" aria-live="polite">
     <div class="boot">
       <div class="boot-logo">K</div>
-      <p>Chargement de Krello…</p>
+      <p id="boot-status">Chargement de Krello…</p>
     </div>
   </div>
   <div id="overlays"></div>
+  <script>
+    // Diagnostic de sécurité : affiche l'erreur si un script module échoue au chargement
+    window.addEventListener('error', function(e) {
+      var status = document.getElementById('boot-status');
+      if (status) {
+        status.innerHTML = '<span style="color:#ef4444">Erreur au démarrage : ' + (e.message || 'Erreur inattendue') + '</span>' +
+          '<br><button onclick="location.reload()" style="margin-top:14px;padding:6px 14px;border-radius:8px;border:1px solid #3b82f6;background:#2563eb;color:#fff;cursor:pointer;font-weight:600;font-size:12px;">Recharger</button>';
+      }
+    });
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

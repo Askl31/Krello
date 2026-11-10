@@ -5,6 +5,7 @@ import { escapeHtml } from '../format.js';
 import { state, loadBoards } from '../state.js';
 import { boardUrl, navigate } from '../router.js';
 import { toast } from './modal.js';
+import { icon } from '../icons.js';
 
 let paletteEl = null;
 
@@ -14,8 +15,16 @@ function openPalette() {
   backdrop.className = 'palette-backdrop';
   backdrop.innerHTML = `
     <div class="palette">
-      <input placeholder="Rechercher un board, une carte, lancer une action…" />
+      <div class="palette-input-wrap">
+        ${icon('search', { size: 18, className: 'muted' })}
+        <input placeholder="Rechercher un board, une carte, lancer une action…" autofocus />
+        <span class="kbd">Échap</span>
+      </div>
       <div class="results"></div>
+      <div class="palette-footer">
+        <span>Navigation : <kbd class="kbd">↑</kbd> <kbd class="kbd">↓</kbd></span>
+        <span>Ouvrir : <kbd class="kbd">↵</kbd></span>
+      </div>
     </div>`;
   document.getElementById('overlays').appendChild(backdrop);
   paletteEl = backdrop;
@@ -25,12 +34,17 @@ function openPalette() {
   let items = [];
   let selected = 0;
 
-  const close = () => { backdrop.remove(); paletteEl = null; };
+  const close = () => {
+    backdrop.style.opacity = '0';
+    backdrop.style.transition = 'opacity 0.15s ease';
+    setTimeout(() => { backdrop.remove(); paletteEl = null; }, 150);
+  };
+
   backdrop.addEventListener('pointerdown', (e) => { if (e.target === backdrop) close(); });
 
   function render() {
     if (!items.length) {
-      results.innerHTML = `<div class="empty">Aucun résultat</div>`;
+      results.innerHTML = `<div class="empty">${icon('search', { size: 28, className: 'muted' })}<p style="margin:8px 0 0">Aucun résultat trouvé</p></div>`;
       return;
     }
     results.innerHTML = items.map((it, i) => `
@@ -58,25 +72,77 @@ function openPalette() {
     const items = [];
     for (const b of state.boards) {
       items.push({
-        icon: '🗂', title: b.title, sub: 'board',
+        icon: icon('boards', { size: 15 }),
+        title: b.title,
+        sub: 'board',
         run: () => navigate(boardUrl(b.id, 'board')),
       });
     }
     if (state.board && state.aiStatus?.available) {
       items.push(
-        { icon: '✨', title: 'Carte en langage naturel', sub: 'N',
-          run: async () => { const m = await import('../components/ai_panel.js'); m.openNaturalCardDialog(); } },
+        {
+          icon: icon('ai', { size: 15 }),
+          title: 'Carte en langage naturel (Apple Intelligence)',
+          sub: 'Raccourci N',
+          run: async () => { const m = await import('../components/ai_panel.js'); m.openNaturalCardDialog(); },
+        },
       );
     }
     items.push(
-      { icon: '＋', title: 'Nouveau board…', run: async () => { const { promptDialog } = await import('./modal.js'); const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Projet Sirius'); if (name) { const b = await api.createBoard({ title: name }); await loadBoards(); navigate(boardUrl(b.id, 'board')); } } },
-      { icon: '↩', title: 'Annuler (undo)', run: async () => { const r = await api.undo(); toast(r?.undone ? `Annulé : ${r.undone}` : 'Rien à annuler', r?.undone ? 'ok' : ''); } },
-      { icon: '↪', title: 'Rétablir (redo)', run: async () => { const r = await api.redo(); toast(r?.redone ? `Rétabli : ${r.redone}` : 'Rien à rétablir', r?.redone ? 'ok' : ''); } },
-      { icon: '⚙', title: 'Paramètres', run: () => navigate('#/settings') },
+      {
+        icon: icon('plus', { size: 15 }),
+        title: 'Nouveau board…',
+        run: async () => {
+          const { promptDialog } = await import('./modal.js');
+          const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Projet Sirius');
+          if (name) {
+            const b = await api.createBoard({ title: name });
+            await loadBoards();
+            navigate(boardUrl(b.id, 'board'));
+          }
+        },
+      },
+      {
+        icon: icon('undo', { size: 15 }),
+        title: 'Annuler (undo)',
+        sub: '⌘Z',
+        run: async () => {
+          const r = await api.undo();
+          toast(r?.undone ? `Annulé : ${r.undone}` : 'Rien à annuler', r?.undone ? 'ok' : '');
+        },
+      },
+      {
+        icon: icon('redo', { size: 15 }),
+        title: 'Rétablir (redo)',
+        sub: '⇧⌘Z',
+        run: async () => {
+          const r = await api.redo();
+          toast(r?.redone ? `Rétabli : ${r.redone}` : 'Rien à rétablir', r?.redone ? 'ok' : '');
+        },
+      },
+      {
+        icon: icon('settings', { size: 15 }),
+        title: 'Paramètres',
+        run: () => navigate('#/settings'),
+      },
     );
-    for (const v of [['board', 'Vue Kanban'], ['calendar', 'Vue Calendrier'], ['timeline', 'Vue Timeline (Gantt)'], ['table', 'Vue Table'], ['dashboard', 'Vue Dashboard']]) {
+
+    const viewDefs = [
+      ['board', 'Vue Kanban', 'kanban'],
+      ['calendar', 'Vue Calendrier', 'calendar'],
+      ['timeline', 'Vue Timeline (Gantt CPM)', 'timeline'],
+      ['table', 'Vue Table', 'table'],
+      ['dashboard', 'Vue Dashboard', 'dashboard'],
+    ];
+
+    for (const v of viewDefs) {
       if (state.board) {
-        items.push({ icon: '👁', title: v[1], sub: 'board courant', run: () => navigate(boardUrl(state.board.id, v[0])) });
+        items.push({
+          icon: icon(v[2], { size: 15 }),
+          title: v[1],
+          sub: 'vue courante',
+          run: () => navigate(boardUrl(state.board.id, v[0])),
+        });
       }
     }
     return items;
@@ -88,7 +154,7 @@ function openPalette() {
     const base = baseItems().filter((it) => it.title.toLowerCase().includes(qLower));
     const hits = await api.search(q, state.board?.id);
     const cardItems = hits.slice(0, 12).map((c) => ({
-      icon: '📄',
+      icon: icon('kanban', { size: 15 }),
       title: c.title,
       sub: state.board && c.board_id === state.board.id ? 'carte' : 'autre board',
       run: async () => {
@@ -108,6 +174,7 @@ function openPalette() {
     if (e.key === 'ArrowDown') { selected = Math.min(selected + 1, items.length - 1); render(); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { selected = Math.max(selected - 1, 0); render(); e.preventDefault(); }
     else if (e.key === 'Enter') { items[selected] && run(items[selected]); }
+    else if (e.key === 'Escape') { close(); }
   });
 
   update();

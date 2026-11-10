@@ -1,14 +1,17 @@
-// Vue Kanban : listes + cartes, drag & drop, quick add, WIP.
+// Vue Kanban : listes + cartes, drag & drop, navigation clavier power-user, quick add, WIP.
 
 import { api } from '../api.js';
 import { escapeHtml, PRIORITY_META } from '../format.js';
 import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
 import { draggable, activeDrag } from '../dnd.js';
-import { toast, promptDialog } from '../ui/modal.js';
+import { toast, promptDialog, openModal } from '../ui/modal.js';
 import { cardTileHtml, attachCardTile } from '../components/card_tile.js';
 import { openCardModal } from '../components/card_modal.js';
+import { icon } from '../icons.js';
 
 let host = null;
+let focusedCardId = null;
+let keyNavAttached = false;
 
 export function renderBoard() {
   host = document.querySelector('.view');
@@ -19,6 +22,7 @@ export function renderBoard() {
     </div>`;
   renderFilters();
   renderLists();
+  initBoardKeyNav();
 }
 
 function renderFilters() {
@@ -28,8 +32,8 @@ function renderFilters() {
   const total = state.cards.filter((c) => !c.archived).length;
   const hasFilters = f.text || f.labelId || f.priority || f.due || f.includeArchived;
   bar.innerHTML = `
-    <span class="flabel">Filtres</span>
-    <input class="input" id="f-text" placeholder="Titre ou description…" value="${escapeHtml(f.text)}" />
+    <span class="flabel">${icon('filter', { size: 13 })} <span>Filtres</span></span>
+    <input class="input" id="f-text" placeholder="Rechercher par titre ou description…" value="${escapeHtml(f.text)}" />
     <select class="input" id="f-label">
       <option value="">Tous les labels</option>
       ${state.labels.map((l) => `<option value="${l.id}" ${f.labelId === l.id ? 'selected' : ''}>${escapeHtml(l.name || '•')}</option>`).join('')}
@@ -44,17 +48,23 @@ function renderFilters() {
       <option value="overdue" ${f.due === 'overdue' ? 'selected' : ''}>En retard</option>
       <option value="week" ${f.due === 'week' ? 'selected' : ''}>≤ 7 jours</option>
     </select>
-    <label class="row" style="gap:5px;flex:none"><input type="checkbox" id="f-archived" ${f.includeArchived ? 'checked' : ''} style="width:14px;height:14px" /><span class="flabel">Archivés</span></label>
-    ${hasFilters ? '<button class="iconbtn" id="f-reset" title="Réinitialiser les filtres" style="width:26px;height:26px;font-size:12px">✕</button>' : ''}
-    <span class="fcount">${visible}/${total} cartes affichées</span>`;
+    <label class="row" style="gap:6px;flex:none;cursor:pointer">
+      <input type="checkbox" id="f-archived" ${f.includeArchived ? 'checked' : ''} style="width:14px;height:14px" />
+      <span class="flabel">Archivés</span>
+    </label>
+    ${hasFilters ? `<button class="iconbtn" id="f-reset" title="Réinitialiser les filtres" style="width:26px;height:26px">${icon('close', { size: 12 })}</button>` : ''}
+    <span class="fcount">${visible}/${total} cartes</span>
+    <button class="iconbtn" id="f-help" title="Raccourcis clavier (?)" style="width:26px;height:26px;margin-left:4px">
+      <span class="kbd" style="font-size:11px">?</span>
+    </button>`;
 
   bar.querySelector('#f-text').addEventListener('input', (e) => {
     state.filters.text = e.target.value;
     const pos = e.target.selectionStart;
     renderLists();
     const again = host.querySelector('#f-text');
-    again.focus();
-    again.setSelectionRange(pos, pos);
+    again?.focus();
+    again?.setSelectionRange(pos, pos);
   });
   bar.querySelector('#f-label').addEventListener('change', (e) => { state.filters.labelId = e.target.value || null; renderLists(); });
   bar.querySelector('#f-priority').addEventListener('change', (e) => { state.filters.priority = e.target.value || null; renderLists(); });
@@ -65,6 +75,7 @@ function renderFilters() {
     renderFilters();
     renderLists();
   });
+  bar.querySelector('#f-help')?.addEventListener('click', () => openShortcutsDialog());
 }
 
 function renderLists() {
@@ -77,9 +88,14 @@ function renderLists() {
 
   const addList = document.createElement('button');
   addList.className = 'list-add';
-  addList.textContent = '＋ Ajouter une liste';
+  addList.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+      ${icon('plus', { size: 16 })}
+      <span>Ajouter une liste</span>
+    </div>
+  `;
   addList.onclick = async () => {
-    const title = await promptDialog('Nom de la liste');
+    const title = await promptDialog('Nom de la liste', '', 'Ex. : En cours, Revue, Bloqué');
     if (!title) return;
     try {
       await api.createList(state.board.id, { title });
@@ -88,6 +104,7 @@ function renderLists() {
   };
   board.appendChild(addList);
   updateFilterBar();
+  applyFocusVisual();
 }
 
 /** Met à jour compteur + bouton reset sans reconstruire la barre (focus conservé). */
@@ -98,7 +115,7 @@ function updateFilterBar() {
   const visible = visibleLists().reduce((s, l) => s + cardsOfList(l.id).length, 0);
   const total = state.cards.filter((c) => !c.archived).length;
   const count = bar.querySelector('.fcount');
-  if (count) count.textContent = `${visible}/${total} cartes affichées`;
+  if (count) count.textContent = `${visible}/${total} cartes`;
   const hasFilters = !!(f.text || f.labelId || f.priority || f.due || f.includeArchived);
   let reset = bar.querySelector('#f-reset');
   if (hasFilters && !reset) {
@@ -106,8 +123,8 @@ function updateFilterBar() {
     reset.className = 'iconbtn';
     reset.id = 'f-reset';
     reset.title = 'Réinitialiser les filtres';
-    reset.style.cssText = 'width:26px;height:26px;font-size:12px';
-    reset.textContent = '✕';
+    reset.style.cssText = 'width:26px;height:26px';
+    reset.innerHTML = icon('close', { size: 12 });
     reset.addEventListener('click', () => {
       state.filters = { text: '', labelId: null, priority: null, due: null, includeArchived: false };
       renderFilters();
@@ -128,20 +145,31 @@ function listEl(list) {
 
   el.innerHTML = `
     <div class="list-head">
-      <h3 data-edit-list="${list.id}">${escapeHtml(list.title)}</h3>
-      <span class="count ${over ? 'wip-warn' : ''}">${cards.length}${list.wip_limit ? `/${list.wip_limit}` : ''}</span>
-      <button class="iconbtn" data-list-menu="${list.id}" title="Menu liste" style="width:26px;height:26px;font-size:13px">⋯</button>
+      <h3 data-edit-list="${list.id}" title="Cliquez pour renommer">${escapeHtml(list.title)}</h3>
+      <span class="count ${over ? 'wip-warn' : ''}" title="${list.wip_limit ? `Limite WIP: ${list.wip_limit}` : ''}">
+        ${cards.length}${list.wip_limit ? `/${list.wip_limit}` : ''}
+      </span>
+      <button class="iconbtn" data-list-menu="${list.id}" title="Menu liste" style="width:26px;height:26px">
+        ${icon('more', { size: 15 })}
+      </button>
     </div>
     <div class="list-body" data-body="${list.id}">
       ${cards.map(cardTileHtml).join('')}
     </div>
-    <button class="add-card" data-add-card="${list.id}">＋ carte</button>
+    <button class="add-card" data-add-card="${list.id}">
+      ${icon('plus', { size: 13 })}
+      <span>Ajouter une carte</span>
+    </button>
   `;
 
   // interactions cartes
   el.querySelectorAll('.card-tile').forEach((tile) => {
     const card = state.cards.find((c) => c.id === tile.dataset.card);
     attachCardTile(tile, card, { onChange: reload });
+    tile.addEventListener('click', () => {
+      focusedCardId = card.id;
+      applyFocusVisual();
+    });
   });
 
   // quick add
@@ -150,7 +178,7 @@ function listEl(list) {
   // édition titre + menu
   el.querySelector('[data-edit-list]').addEventListener('click', async () => {
     const nv = await promptDialog('Renommer la liste', list.title);
-    if (nv) { await api.updateList(list.id, { title: nv }); reload(); }
+    if (nv && nv !== list.title) { await api.updateList(list.id, { title: nv }); reload(); }
   });
   el.querySelector('[data-list-menu]').addEventListener('click', async (e) => {
     showListMenu(e.currentTarget, list);
@@ -160,7 +188,7 @@ function listEl(list) {
   draggable(el, {
     kind: 'list',
     id: list.id,
-    canDrag: (ev) => !!ev.target.closest('.list-head h3, .list-head'),
+    canDrag: (ev) => !!ev.target.closest('.list-head h3, .list-head') && !ev.target.closest('button'),
     targetSelector: '.board .list',
     onDrop: async ({ targetEl }) => {
       const targetId = targetEl.dataset.list;
@@ -185,21 +213,20 @@ function showListMenu(anchor, list) {
   const existing = document.querySelector('.list-menu');
   existing?.remove();
   const menu = document.createElement('div');
-  menu.className = 'list-menu ai-drawer';
-  menu.style.width = '220px';
+  menu.className = 'list-menu';
+  menu.style.width = '200px';
   const r = anchor.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, r.left - 180)}px`;
+  menu.style.top = `${r.bottom + 6}px`;
+  menu.style.left = `${Math.min(window.innerWidth - 215, Math.max(8, r.left - 160))}px`;
   menu.innerHTML = `
-    <div class="ai-row" style="flex-direction:column;align-items:stretch;gap:6px">
-      <button class="btn sm" data-act="wip">Limite WIP…</button>
-      <button class="btn sm" data-act="archive">${list.archived ? 'Désarchiver' : 'Archiver la liste'}</button>
-      <button class="btn danger sm" data-act="delete">Supprimer la liste</button>
-    </div>`;
+    <button data-act="wip">${icon('settings', { size: 14 })} <span>Limite WIP…</span></button>
+    <button data-act="archive">${icon('boards', { size: 14 })} <span>${list.archived ? 'Désarchiver' : 'Archiver la liste'}</span></button>
+    <button class="danger" data-act="delete">${icon('trash', { size: 14 })} <span>Supprimer la liste</span></button>
+  `;
   document.getElementById('overlays').appendChild(menu);
   const close = () => menu.remove();
   setTimeout(() => document.addEventListener('pointerdown', function h(e) {
-    if (!menu.contains(e.target)) { close(); document.removeEventListener('pointerdown', h); }
+    if (!menu.contains(e.target) && e.target !== anchor) { close(); document.removeEventListener('pointerdown', h); }
   }), 0);
   menu.addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -223,28 +250,246 @@ function showListMenu(anchor, list) {
 }
 
 async function quickAdd(listId, body) {
-  const input = document.createElement('input');
-  input.className = 'input';
-  input.placeholder = 'Titre de la carte (Entrée pour valider)';
-  body.appendChild(input);
-  input.focus();
-  let done = false;
+  const existing = body.querySelector('.quick-add-form');
+  if (existing) {
+    existing.querySelector('textarea')?.focus();
+    return;
+  }
+
+  const form = document.createElement('div');
+  form.className = 'quick-add-form card-tile fade-in';
+  form.style.padding = '8px 10px';
+  form.innerHTML = `
+    <textarea class="input" placeholder="Titre de la carte…" rows="2" style="min-height:54px;padding:6px 8px;font-size:13px;resize:none;margin-bottom:8px"></textarea>
+    <div class="row" style="gap:6px">
+      <button class="btn primary sm" data-submit style="flex:none">Ajouter</button>
+      <button class="btn ghost sm" data-cancel style="flex:none">Annuler</button>
+      <span class="muted" style="font-size:11px;margin-left:auto"><kbd class="kbd">Entrée ↵</kbd></span>
+    </div>
+  `;
+  body.appendChild(form);
+  const textarea = form.querySelector('textarea');
+  textarea.focus();
+
+  const cancel = () => form.remove();
   const submit = async () => {
-    if (done) return;
-    done = true;
-    const title = input.value.trim();
-    input.remove();
-    if (!title) return;
+    const title = textarea.value.trim();
+    if (!title) { cancel(); return; }
+    form.remove();
     try {
       await api.createCard(state.board.id, { title, list_id: listId });
       await reload();
     } catch (e) { toast(e.message, 'err'); }
   };
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit();
-    if (e.key === 'Escape') { done = true; input.remove(); }
+
+  form.querySelector('[data-submit]').onclick = submit;
+  form.querySelector('[data-cancel]').onclick = cancel;
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
   });
-  input.addEventListener('blur', () => submit());
+}
+
+function applyFocusVisual() {
+  document.querySelectorAll('.card-tile.keyboard-focused').forEach((c) => c.classList.remove('keyboard-focused'));
+  if (!focusedCardId) return;
+  const tile = document.querySelector(`.card-tile[data-card="${focusedCardId}"]`);
+  if (tile) {
+    tile.classList.add('keyboard-focused');
+    tile.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  }
+}
+
+/** Navigation clavier avancée (flèches, J/K, H/L, Espace, E, A, ?) */
+function initBoardKeyNav() {
+  if (keyNavAttached) return;
+  keyNavAttached = true;
+
+  window.addEventListener('keydown', async (e) => {
+    if (state.view !== 'board' || !state.board) return;
+    const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    if (inField) return;
+    if (document.querySelector('.modal-backdrop, .palette-backdrop, .list-menu')) return;
+
+    const lists = visibleLists();
+    if (!lists.length) return;
+
+    // Raccourci d'aide '?'
+    if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+      e.preventDefault();
+      openShortcutsDialog();
+      return;
+    }
+
+    // Si aucune carte n'est sélectionnée, initialiser sur la 1ère carte
+    if (!focusedCardId) {
+      for (const l of lists) {
+        const cs = cardsOfList(l.id);
+        if (cs.length) { focusedCardId = cs[0].id; applyFocusVisual(); break; }
+      }
+      return;
+    }
+
+    const currentCard = state.cards.find((c) => c.id === focusedCardId);
+    if (!currentCard) return;
+
+    const currentListIndex = lists.findIndex((l) => l.id === currentCard.list_id);
+    const currentListCards = cardsOfList(currentCard.list_id);
+    const currentCardIndex = currentListCards.findIndex((c) => c.id === currentCard.id);
+
+    const key = e.key.toLowerCase();
+
+    // Haut (K ou ArrowUp)
+    if (e.key === 'ArrowUp' || key === 'k') {
+      e.preventDefault();
+      if (currentCardIndex > 0) {
+        focusedCardId = currentListCards[currentCardIndex - 1].id;
+        applyFocusVisual();
+      }
+    }
+    // Bas (J ou ArrowDown)
+    else if (e.key === 'ArrowDown' || key === 'j') {
+      e.preventDefault();
+      if (currentCardIndex < currentListCards.length - 1) {
+        focusedCardId = currentListCards[currentCardIndex + 1].id;
+        applyFocusVisual();
+      }
+    }
+    // Gauche (H ou ArrowLeft)
+    else if (e.key === 'ArrowLeft' || key === 'h') {
+      e.preventDefault();
+      if (currentListIndex > 0) {
+        const prevListCards = cardsOfList(lists[currentListIndex - 1].id);
+        if (prevListCards.length) {
+          const targetIdx = Math.min(currentCardIndex, prevListCards.length - 1);
+          focusedCardId = prevListCards[targetIdx].id;
+          applyFocusVisual();
+        }
+      }
+    }
+    // Droite (L ou ArrowRight)
+    else if (e.key === 'ArrowRight' || key === 'l') {
+      e.preventDefault();
+      if (currentListIndex < lists.length - 1) {
+        const nextListCards = cardsOfList(lists[currentListIndex + 1].id);
+        if (nextListCards.length) {
+          const targetIdx = Math.min(currentCardIndex, nextListCards.length - 1);
+          focusedCardId = nextListCards[targetIdx].id;
+          applyFocusVisual();
+        }
+      }
+    }
+    // Entrée : ouvrir la carte
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      openCardModal(focusedCardId, { onChange: reload });
+    }
+    // Espace : basculer terminée
+    else if (e.key === ' ') {
+      e.preventDefault();
+      const nv = !currentCard.due_complete;
+      await api.updateCard(currentCard.id, { due_complete: nv });
+      toast(nv ? '✓ Tâche terminée !' : 'Tâche marquée à faire', 'ok');
+      await reload();
+    }
+    // 'e' : édition rapide du titre inline
+    else if (key === 'e' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      quickEditTileTitle(focusedCardId);
+    }
+    // 'a' : ajouter une carte dans la liste active
+    else if (key === 'a' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      const listElNode = document.querySelector(`.list[data-list="${currentCard.list_id}"]`);
+      if (listElNode) {
+        quickAdd(currentCard.list_id, listElNode.querySelector('.list-body'));
+      }
+    }
+  });
+}
+
+function quickEditTileTitle(cardId) {
+  const tile = document.querySelector(`.card-tile[data-card="${cardId}"]`);
+  if (!tile) return;
+  const titleEl = tile.querySelector('.title');
+  if (!titleEl) return;
+  const currentTitle = titleEl.textContent.trim();
+
+  const input = document.createElement('input');
+  input.className = 'input';
+  input.value = currentTitle;
+  input.style.cssText = 'padding:3px 6px;font-size:13.5px;font-weight:550;width:100%';
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const nv = input.value.trim();
+    if (save && nv && nv !== currentTitle) {
+      await api.updateCard(cardId, { title: nv });
+      await reload();
+    } else {
+      input.replaceWith(titleEl);
+    }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') finish(true);
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+export function openShortcutsDialog() {
+  openModal(`
+    <div class="dialog-header">
+      <div class="dialog-badge">${icon('boards', { size: 18 })}</div>
+      <div class="dialog-titles">
+        <h3 class="dialog-title">Raccourcis Clavier Krello</h3>
+        <p class="dialog-desc">Naviguez et gérez vos projets et tableaux à la vitesse de la pensée.</p>
+      </div>
+      <button class="iconbtn dialog-close" data-close title="Fermer (Échap)">${icon('close', { size: 14 })}</button>
+    </div>
+    <div class="dialog-body" style="font-size:13px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px">
+        <div>
+          <div class="modal-section" style="margin-bottom:0">
+            <div class="label">Navigation Kanban</div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Naviguer entre cartes</span> <div><span class="kbd">← ↓ ↑ →</span> <span class="muted" style="font-size:11px">ou</span> <span class="kbd">HJKL</span></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Ouvrir la carte</span> <span class="kbd">Entrée ↵</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Terminer / réouvrir</span> <span class="kbd">Espace</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Édition rapide du titre</span> <span class="kbd">E</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Nouvelle carte</span> <span class="kbd">A</span></div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="modal-section" style="margin-bottom:0">
+            <div class="label">Général & Système</div>
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Palette commandes</span> <span class="kbd">⌘K</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Annuler</span> <span class="kbd">⌘Z</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Rétablir</span> <span class="kbd">⇧⌘Z</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Carte IA naturelle</span> <span class="kbd">N</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Fermer le dialogue</span> <span class="kbd">Échap</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Raccourcis clavier</span> <span class="kbd">?</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <div class="dialog-hints">
+        <span class="kbd">Échap</span> pour fermer
+      </div>
+      <div class="dialog-btns">
+        <button class="btn primary" data-close>Fermer</button>
+      </div>
+    </div>`, { size: 'md' });
 }
 
 async function reload() {

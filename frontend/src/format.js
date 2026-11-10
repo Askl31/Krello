@@ -1,5 +1,7 @@
 // Formatage FR + utilitaires de rendu.
 
+import { icon } from './icons.js';
+
 export function escapeHtml(s) {
   return String(s ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -84,14 +86,15 @@ export const LABEL_COLORS = [
 export function priorityBadge(card) {
   const m = PRIORITY_META[card.priority] || PRIORITY_META.none;
   if (card.priority === 'none') return '';
-  return `<span class="mini" style="color:${m.color}">▲ ${m.label}</span>`;
+  return `<span class="badge" style="color:${m.color};border-color:color-mix(in srgb, ${m.color} 35%, transparent);background:color-mix(in srgb, ${m.color} 10%, transparent)">${icon('arrowUp', { size: 10 })} ${m.label}</span>`;
 }
 
 export function dueBadge(card) {
   const state = dueState(card);
   if (!card.due) return '';
   const cls = card.due_complete ? 'done' : state === 'overdue' ? 'overdue' : state === 'due-soon' ? 'due-soon' : '';
-  return `<span class="badge ${cls}">${card.due_complete ? '✓' : '⏰'} ${fmtDateShort(card.due)}</span>`;
+  const ic = card.due_complete ? icon('check', { size: 11 }) : icon('clock', { size: 11 });
+  return `<span class="badge ${cls}">${ic} <span>${fmtDateShort(card.due)}</span></span>`;
 }
 
 export function progressPct(checklists) {

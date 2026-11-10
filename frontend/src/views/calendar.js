@@ -7,6 +7,7 @@ import { draggable } from '../dnd.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
 import { saveViewSettings } from './view_helpers.js';
+import { icon } from '../icons.js';
 
 const DOW = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
 
@@ -41,12 +42,12 @@ export function renderCalendar() {
 
   host.innerHTML = `
     <div class="cal-head">
-      <button class="iconbtn" id="cal-prev">←</button>
+      <button class="iconbtn" id="cal-prev" title="Mois précédent">${icon('chevronLeft', { size: 16 })}</button>
       <h2 style="text-transform:capitalize">${monthName}</h2>
-      <button class="iconbtn" id="cal-next">→</button>
+      <button class="iconbtn" id="cal-next" title="Mois suivant">${icon('chevronRight', { size: 16 })}</button>
       <button class="btn sm" id="cal-today">Aujourd'hui</button>
       <div class="spacer" style="flex:1"></div>
-      <span class="muted" style="font-size:12px">Glissez une carte vers un autre jour pour replanifier</span>
+      <span class="muted" style="font-size:12px">Glissez une carte vers un autre jour pour replanifier l'échéance</span>
     </div>
     <div class="cal-grid">
       ${DOW.map((d) => `<div class="cal-dow">${d}</div>`).join('')}
@@ -62,7 +63,8 @@ export function renderCalendar() {
                 ? state.labels.find((l) => l.id === c._label_ids[0])?.color : null;
               return `<button class="cal-card" data-card="${c.id}" title="${escapeHtml(c.title)}">
                 ${labelColor ? `<span class="lbl" style="background:${labelColor}"></span>` : ''}
-                ${c.due_complete ? '✓ ' : ''}${escapeHtml(c.title)}
+                ${c.due_complete ? `<span style="color:var(--success);margin-right:3px">✓</span>` : ''}
+                <span>${escapeHtml(c.title)}</span>
               </button>`;
             }).join('')}
           </div>`;
@@ -91,7 +93,7 @@ export function renderCalendar() {
         const old = parseDate(card.due);
         let due = day;
         const hasTime = !/^\d{4}-\d{2}-\d{2}$/.test(String(card.due));
-        if (hasTime) {
+        if (hasTime && old) {
           const t = `${String(old.getHours()).padStart(2, '0')}:${String(old.getMinutes()).padStart(2, '0')}`;
           due = `${day}T${t}:00`;
         }
@@ -105,14 +107,14 @@ export function renderCalendar() {
   });
 }
 
-function shift(delta) {
-  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1);
+function shift(months) {
+  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + months, 1);
   persist();
   renderCalendar();
 }
 
 function persist() {
-  saveViewSettings('calendar', { cursor: toISODate(cursor) });
+  saveViewSettings('calendar', { cursor: cursor.toISOString() });
 }
 
 async function rerender() {

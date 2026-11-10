@@ -5,6 +5,7 @@ import { escapeHtml, fmtDateShort, PRIORITY_META } from '../format.js';
 import { state, visibleLists, effectiveDates, refreshBoard } from '../state.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
+import { icon } from '../icons.js';
 
 let sortKey = 'wbs';
 let sortDir = 1;
@@ -42,30 +43,43 @@ export function renderTable() {
   ];
 
   host.innerHTML = `
+    <div class="cal-head">
+      <h2>Vue Table & Suivi</h2>
+      <div class="spacer" style="flex:1"></div>
+      <span class="muted" style="font-size:12px">${cards.length} ligne(s) · cliquez un titre pour ouvrir · édition directe des durées et avancement</span>
+    </div>
     <div class="tbl">
       <table class="grid">
         <thead><tr>
-          ${cols.map(([k, label]) => `<th data-sort="${k}">${label}${sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}
+          ${cols.map(([k, label]) => `
+            <th data-sort="${k}">
+              <div style="display:flex;align-items:center;gap:4px">
+                <span>${label}</span>
+                ${sortKey === k ? `<span style="color:var(--accent)">${sortDir > 0 ? '▲' : '▼'}</span>` : ''}
+              </div>
+            </th>`).join('')}
         </tr></thead>
         <tbody>
           ${cards.map((c) => `
             <tr data-card="${c.id}" class="${c.due_complete ? 'done' : ''}">
-              <td class="muted">${escapeHtml(c.wbs || '')}</td>
-              <td>${c.is_milestone ? '◆ ' : ''}${escapeHtml(c.title)}</td>
+              <td class="muted"><span class="kbd">${escapeHtml(c.wbs || '—')}</span></td>
+              <td style="font-weight:550;color:var(--fg)">
+                ${c.is_milestone ? '<span style="color:var(--warning);margin-right:4px">◆</span>' : ''}
+                <span>${escapeHtml(c.title)}</span>
+              </td>
               <td class="muted">${escapeHtml(listById(c.list_id)?.title || '')}</td>
-              <td class="muted">${escapeHtml(labelNames(c))}</td>
-              <td><span style="color:${PRIORITY_META[c.priority]?.color || 'inherit'}">${PRIORITY_META[c.priority]?.label || '—'}</span></td>
-              <td class="muted">${fmtDateShort(effectiveDates(c).start)}</td>
-              <td class="muted">${fmtDateShort(effectiveDates(c).end)}</td>
-              <td><input class="cell-edit" data-num="duration_days" style="width:52px" value="${c.duration_days ?? ''}" /></td>
-              <td><input class="cell-edit" data-num="work_hours" style="width:52px" value="${c.work_hours ?? ''}" /></td>
-              <td><input class="cell-edit" data-num="pct_complete" style="width:44px" value="${c.pct_complete}" /></td>
-              <td>${c.is_milestone ? '<span class="badge">jalon</span>' : (c.due_complete ? '<span class="badge done">✓ finie</span>' : '<span class="muted">tâche</span>')}</td>
+              <td>${escapeHtml(labelNames(c)) || '<span class="muted">—</span>'}</td>
+              <td><span style="color:${PRIORITY_META[c.priority]?.color || 'inherit'};font-weight:550">${PRIORITY_META[c.priority]?.label || '—'}</span></td>
+              <td class="muted">${fmtDateShort(effectiveDates(c).start) || '—'}</td>
+              <td class="muted">${fmtDateShort(effectiveDates(c).end) || '—'}</td>
+              <td><input class="cell-edit" data-num="duration_days" style="width:52px" value="${c.duration_days ?? ''}" placeholder="—" /></td>
+              <td><input class="cell-edit" data-num="work_hours" style="width:52px" value="${c.work_hours ?? ''}" placeholder="—" /></td>
+              <td><input class="cell-edit" data-num="pct_complete" style="width:48px" value="${c.pct_complete}" /></td>
+              <td>${c.is_milestone ? '<span class="badge" style="color:var(--warning)">jalon</span>' : (c.due_complete ? '<span class="badge done">✓ finie</span>' : '<span class="muted" style="font-size:12px">tâche</span>')}</td>
             </tr>`).join('')}
         </tbody>
       </table>
-    </div>
-    <p class="muted" style="font-size:12px;margin-top:8px">${cards.length} lignes · cliquez un titre pour ouvrir la carte · durée/charge/% éditables inline</p>`;
+    </div>`;
 
   host.querySelectorAll('th[data-sort]').forEach((th) => {
     th.onclick = () => {

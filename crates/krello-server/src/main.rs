@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tower_http::services::ServeDir;
 
 use krello_core::db::Db;
 use krello_core::service::Service;
@@ -85,19 +84,13 @@ async fn main() {
     }
 
     let state = make_state(service, token, ai);
-    let mut app = build_router(state);
-
-    match frontend_dir() {
-        Some(dir) => {
-            tracing::info!("frontend servi depuis {}", dir.display());
-            app = app.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true));
-        }
-        None => {
-            // Assets embarqués à la compilation (include_dir) — le binaire est autonome.
-            tracing::info!("frontend servi depuis les assets embarqués");
-            app = app.fallback_service(axum::routing::get(krello_server::embedded_frontend_handler));
-        }
+    if let Some(dir) = frontend_dir() {
+        tracing::info!("frontend disponible sur disque ({}) et embarqué", dir.display());
+    } else {
+        tracing::info!("frontend servi depuis les assets embarqués");
     }
+    let app = build_router(state)
+        .fallback_service(axum::routing::get(krello_server::embedded_frontend_handler));
 
     if open_browser {
         let url = format!("http://{addr}/");

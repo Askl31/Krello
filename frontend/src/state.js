@@ -16,12 +16,64 @@ export const state = {
   settings: {},       // board_views settings (json par vue)
   view: 'board',      // board | calendar | timeline | table | dashboard
   filters: { text: '', labelId: null, priority: null, due: null, includeArchived: false },
-  theme: localStorage.getItem('krello-theme') || 'dark',
+  theme: localStorage.getItem('krello-theme') || 'auto',
 };
 
+export function getResolvedTheme() {
+  if (state.theme === 'auto') {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  return state.theme;
+}
+
 export function applyTheme() {
-  document.documentElement.dataset.theme = state.theme;
+  const resolved = getResolvedTheme();
+  document.documentElement.dataset.theme = resolved;
   localStorage.setItem('krello-theme', state.theme);
+  if (state.board) {
+    applyBoardBackground(state.board.background);
+  }
+}
+
+// Détection dynamique du changement d'apparence système macOS
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (state.theme === 'auto') applyTheme();
+  });
+}
+
+export function applyBoardBackground(bg) {
+  const main = document.getElementById('main');
+  if (!main) return;
+  const isLight = document.documentElement.dataset.theme === 'light';
+
+  if (!bg) {
+    main.style.background = '';
+    return;
+  }
+  try {
+    const parsed = typeof bg === 'string' ? JSON.parse(bg) : bg;
+    // Si c'est la valeur par défaut du backend (#101828) ou "default" :
+    // en mode clair, on ne force pas le fond sombre pour préserver le thème clair épuré
+    if (parsed.value === '#101828' || parsed.type === 'default' || !parsed.value) {
+      main.style.background = isLight ? '' : '#101828';
+      return;
+    }
+    if (parsed.type === 'color' || parsed.type === 'gradient') {
+      main.style.background = parsed.value;
+      return;
+    }
+  } catch { /* ignore */ }
+
+  if (typeof bg === 'string') {
+    if (bg === '#101828') {
+      main.style.background = isLight ? '' : '#101828';
+      return;
+    }
+    if (bg.startsWith('#') || bg.startsWith('linear-gradient')) {
+      main.style.background = bg;
+    }
+  }
 }
 
 export async function loadBoards() {
@@ -41,6 +93,7 @@ export async function loadBoard(boardId) {
   let schedule = null;
   try { schedule = await api.schedule(boardId); } catch { /* pas de dates */ }
   Object.assign(state, { board, lists, cards, labels, fields, deps, schedule });
+  applyBoardBackground(board.background);
   emit('board.loaded', boardId);
 }
 
