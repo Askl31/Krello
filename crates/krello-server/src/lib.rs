@@ -47,11 +47,21 @@ async fn local_guard(
     next.run(req).await
 }
 
-/// Full API router (REST + WS) with the local guard and tracing.
+/// Full API router (REST + WS) with the local guard, no-cache and tracing.
 pub fn build_router(state: SharedState) -> axum::Router {
+    async fn no_cache(req: Request<axum::body::Body>, next: Next) -> Response {
+        let mut res = next.run(req).await;
+        res.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        );
+        res
+    }
     let guarded = routes::router(state.clone())
         .layer(middleware::from_fn_with_state(state, local_guard));
-    guarded.layer(TraceLayer::new_for_http())
+    guarded
+        .layer(middleware::from_fn(no_cache))
+        .layer(TraceLayer::new_for_http())
 }
 
 /// Build the shared application state.
