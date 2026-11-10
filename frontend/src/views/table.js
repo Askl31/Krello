@@ -87,7 +87,7 @@ export function renderTable() {
       const patch = { [field]: v === '' ? null : Number(v) };
       try {
         await api.updateCard(cardId, patch);
-        await hydrateLabelIds();
+        await refreshBoard();
       } catch (e) {
         toast(e.message, 'err');
         rerender();

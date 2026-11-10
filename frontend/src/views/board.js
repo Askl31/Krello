@@ -255,7 +255,7 @@ async function reload() {
 /** Déplacement de carte utilisé par le DnD (exposé au module card_tile). */
 window.__krelloMoveCard = async (cardId, move) => {
   await api.moveCard(cardId, move);
-  await hydrateLabelIds();
+  await refreshBoard();
 };
 
 export function isDragging() {
