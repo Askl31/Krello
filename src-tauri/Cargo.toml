@@ -1,0 +1,19 @@
+[package]
+name = "krello-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Krello native app (Tauri v2) embedding the local server"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+krello-core = { path = "../crates/krello-core" }
+krello-server = { path = "../crates/krello-server" }
+tauri = { version = "2", features = [] }
+axum = { version = "0.8", features = ["ws"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true

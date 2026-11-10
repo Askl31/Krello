@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Krello",
+  "version": "0.1.0",
+  "identifier": "com.krello.app",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Kanban + Gantt/CPM local (clone Trello & MS Project)",
+    "longDescription": "Gestion de projet locale orientée Kanban : boards, cartes, labels, checklists, calendrier, timeline Gantt avec chemin critique, table, dashboard, automatisations et Apple Intelligence on-device."
+  }
+}

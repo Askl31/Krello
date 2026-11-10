@@ -1,0 +1,9 @@
+[package]
+name = "krello-ai-helper"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Compiles and embeds the Swift Apple Intelligence helper binary (macOS only)"
+
+[lib]
+name = "krello_ai_helper"

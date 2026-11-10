@@ -1,0 +1,58 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test --workspace
+      - name: Build release
+        run: cargo build --release -p krello-server
+
+  macos-app:
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check app native
+        run: cargo check -p krello-app
+      - name: Bundle (optionnel)
+        run: |
+          npm i -g @tauri-apps/cli
+          npx @tauri-apps/cli build --target universal-apple-darwin || npx @tauri-apps/cli build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: krello-macos
+          path: |
+            target/release/krello
+            target/release/bundle/**
+          if-no-files-found: ignore
+
+  windows-app:
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build exe
+        run: cargo build --release -p krello-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: krello-windows
+          path: target/release/krello.exe
