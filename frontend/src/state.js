@@ -50,6 +50,12 @@ export async function refreshSchedule() {
   emit('board.loaded');
 }
 
+export async function refreshBoard() {
+  if (!state.board) return;
+  await loadBoard(state.board.id);
+  await hydrateLabelIds();
+}
+
 export function cardById(id) {
   return state.cards.find((c) => c.id === id);
 }

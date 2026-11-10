@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml } from '../format.js';
-import { state, cardsOfList, visibleLists, hydrateLabelIds } from '../state.js';
+import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
 import { draggable, activeDrag } from '../dnd.js';
 import { toast, promptDialog } from '../ui/modal.js';
 import { cardTileHtml, attachCardTile } from '../components/card_tile.js';
@@ -30,8 +30,7 @@ export function renderBoard() {
     if (!title) return;
     try {
       await api.createList(state.board.id, { title });
-      await hydrateLabelIds();
-      renderBoard();
+      await reload();
     } catch (e) { toast(e.message, 'err'); }
   };
   board.appendChild(addList);
@@ -147,7 +146,7 @@ async function quickAdd(listId, body) {
   body.appendChild(input);
   input.focus();
   let done = false;
-  const submit = async (archive) => {
+  const submit = async () => {
     if (done) return;
     done = true;
     const title = input.value.trim();
@@ -155,19 +154,18 @@ async function quickAdd(listId, body) {
     if (!title) return;
     try {
       await api.createCard(state.board.id, { title, list_id: listId });
-      await hydrateLabelIds();
-      renderBoard();
+      await reload();
     } catch (e) { toast(e.message, 'err'); }
   };
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit(false);
+    if (e.key === 'Enter') submit();
     if (e.key === 'Escape') { done = true; input.remove(); }
   });
-  input.addEventListener('blur', () => submit(false));
+  input.addEventListener('blur', () => submit());
 }
 
 async function reload() {
-  await hydrateLabelIds();
+  await refreshBoard();
   renderBoard();
 }
 

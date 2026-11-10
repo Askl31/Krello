@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { parseDate, toISODate, fmtDateShort, fmtDate, escapeHtml } from '../format.js';
-import { state, visibleLists, effectiveDates, hydrateLabelIds } from '../state.js';
+import { state, visibleLists, effectiveDates, refreshBoard } from '../state.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
 import { saveViewSettings } from './view_helpers.js';
@@ -236,6 +236,6 @@ function listName(listId) {
 }
 
 async function rerender() {
-  await hydrateLabelIds();
+  await refreshBoard();
   renderTimeline();
 }

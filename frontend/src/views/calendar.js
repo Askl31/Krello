@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml, toISODate, fmtDate, parseDate, fmtDateShort } from '../format.js';
-import { state, hydrateLabelIds } from '../state.js';
+import { state, refreshBoard } from '../state.js';
 import { draggable } from '../dnd.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
@@ -116,6 +116,6 @@ function persist() {
 }
 
 async function rerender() {
-  await hydrateLabelIds();
+  await refreshBoard();
   renderCalendar();
 }

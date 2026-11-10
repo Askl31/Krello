@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml, fmtDateShort, PRIORITY_META } from '../format.js';
-import { state, visibleLists, effectiveDates, hydrateLabelIds } from '../state.js';
+import { state, visibleLists, effectiveDates, refreshBoard } from '../state.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
 
@@ -97,6 +97,6 @@ export function renderTable() {
 }
 
 async function rerender() {
-  await hydrateLabelIds();
+  await refreshBoard();
   renderTable();
 }

@@ -45,23 +45,23 @@ async function renderRoute() {
 
   if (route.startsWith('#/b/')) {
     const [, , boardId, view = 'board'] = route.split('/');
-    if (!state.board || state.board.id !== boardId) {
+    try {
+      // Toujours recharger : les événements WS et les mutations locales
+      // doivent refléter l'état serveur (listes, cartes, deps, schedule).
+      await loadBoard(boardId);
+      const allSettings = {};
       try {
-        await loadBoard(boardId);
-        const allSettings = {}; // settings par vue via board_views (une seule route GET dédiée ci-dessous)
-        try {
-          const views = await api.get(`/api/v1/boards/${boardId}/views`);
-          for (const v of views) allSettings[v.view] = JSON.parse(v.settings || '{}');
-        } catch { /* optionnel */ }
-        loadViewSettings(allSettings);
-      } catch (e) {
-        document.getElementById('main').innerHTML =
-          `<div class="empty-state"><div class="big">🌫</div><p>Board introuvable : ${e.message}</p></div>`;
-        return;
-      }
+        const views = await api.get(`/api/v1/boards/${boardId}/views`);
+        for (const v of views) allSettings[v.view] = JSON.parse(v.settings || '{}');
+      } catch { /* optionnel */ }
+      loadViewSettings(allSettings);
+    } catch (e) {
+      document.getElementById('main').innerHTML =
+        `<div class="empty-state"><div class="big">🌫</div><p>Board introuvable : ${e.message}</p></div>`;
+      return;
     }
     state.view = view;
-    if (state.board.id === boardId) await hydrateLabelIds();
+    await hydrateLabelIds();
     renderTopbar(document.getElementById('topbar'));
     const main = document.getElementById('main');
     main.innerHTML = '<div class="view"></div>';
