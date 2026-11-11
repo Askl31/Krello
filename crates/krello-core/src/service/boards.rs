@@ -1,5 +1,6 @@
 //! Board CRUD, duplication, board activity feed.
 
+use std::path::PathBuf;
 use rusqlite::{params, OptionalExtension};
 
 use super::{now_updated, Service};
@@ -70,6 +71,7 @@ impl Service {
         Ok(boards)
     }
 
+    /// Update board partial (title, description, background, calendar, dates…).
     pub fn update_board(&self, id: &str, u: UpdateBoard) -> Result<Board> {
         if let Some(t) = &u.title {
             if t.trim().is_empty() {
@@ -146,6 +148,80 @@ impl Service {
             board_id: id.to_string(),
         });
         Ok(after)
+    }
+
+    /// Store a board background IMAGE: validated (mime + extension), written as
+    /// `<backgrounds>/<id><ext>`. Returns the background JSON to store on the
+    /// board (`{"type":"image","value":"<filename>"}`) — undo goes through the
+    /// regular BoardUpdated entry.
+    pub fn set_board_background_image(
+        &self,
+        board_id: &str,
+        filename: &str,
+        mime: &str,
+        data: &[u8],
+    ) -> Result<String> {
+        const MAX_BACKGROUND_BYTES: i64 = 8 * 1024 * 1024;
+        const ALLOWED: [(&str, &str); 6] = [
+            ("image/png", ".png"),
+            ("image/jpeg", ".jpg"),
+            ("image/webp", ".webp"),
+            ("image/gif", ".gif"),
+            ("image/avif", ".avif"),
+            ("image/svg+xml", ".svg"),
+        ];
+        if data.len() as i64 > MAX_BACKGROUND_BYTES {
+            return Err(Error::Validation(format!(
+                "image trop volumineuse (max {} Mo)",
+                MAX_BACKGROUND_BYTES / 1024 / 1024
+            )));
+        }
+        let Some((_, ext)) = ALLOWED.iter().find(|(m, _)| *m == mime) else {
+            return Err(Error::Validation(format!(
+                "type d'image non supporté: {mime} (attendus: png, jpeg, webp, gif, avif, svg)"
+            )));
+        };
+        let lower = filename.to_lowercase();
+        let looks_image = ALLOWED.iter().any(|(_, e)| lower.ends_with(e));
+        if !looks_image {
+            return Err(Error::Validation("nom de fichier image attendu".into()));
+        }
+
+        let db = self.lock_db()?;
+        query_board(&db.conn, board_id)?
+            .ok_or_else(|| Error::NotFound(format!("board {board_id}")))?;
+        std::fs::create_dir_all(&self.backgrounds_dir)?;
+        let bg_id = new_id("bg");
+        let stored = self.backgrounds_dir.join(format!("{bg_id}{ext}"));
+        std::fs::write(&stored, data)?;
+        drop(db);
+        Ok(serde_json::json!({ "type": "image", "value": format!("{bg_id}{ext}") }).to_string())
+    }
+
+    /// Resolve a stored background filename to a canonical path INSIDE the
+    /// backgrounds dir (path-traversal guard).
+    pub fn background_path_checked(&self, stored_name: &str) -> Result<PathBuf> {
+        // Seuls les noms générés par le serveur sont servis (id + extension).
+        let ok = stored_name.starts_with("bg_")
+            && !stored_name.contains(['/', '\\', '\0'])
+            && std::path::Path::new(stored_name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| [".png", ".jpg", ".webp", ".gif", ".avif", ".svg"].contains(&format!(".{e}").as_str()))
+                .unwrap_or(false);
+        if !ok {
+            return Err(Error::Validation("nom de fond de board invalide".into()));
+        }
+        let dir = self.backgrounds_dir.canonicalize()?;
+        let canonical = std::path::Path::new(stored_name)
+            .canonicalize()
+            .map_err(|_| Error::NotFound("fond de board".into()))?;
+        if !canonical.starts_with(&dir) {
+            return Err(Error::Validation(
+                "chemin hors répertoire des fonds de board".into(),
+            ));
+        }
+        Ok(canonical)
     }
 
     pub fn delete_board(&self, id: &str) -> Result<()> {

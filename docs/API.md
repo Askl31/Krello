@@ -17,7 +17,7 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 | `POST /boards` | `{title, description?, background?, calendar_id?, start_date?, deadline?}` |
 | `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade, undoable ⌘Z) · `DELETE /boards` → `{deleted: n}` = **tout supprimer** (boards archivés compris, pièces jointes purgées du disque, une seule entrée undo) |
 | `POST /boards/{id}/duplicate` | copie profonde |
-| `GET /boards/{id}/activity?limit=` | flux d'activité |
+| `GET /boards/{id}/activity?limit=&card_id=` | flux d'activité · `card_id` → activité de CETTE carte (section « Activité » de la modale) |
 | `GET /boards/{id}/lists` `POST` | listes |
 | `GET /boards/{id}/cards?include_archived=` `POST` | cartes |
 | `GET /boards/{id}/cards/meta` | métadonnées par carte en UNE requête : `{card_id: {label_ids, checklists_count, checklist_items, checklist_done, comments_count, attachments_count}}` (hydratation des tuiles sans N+1) |
@@ -36,7 +36,7 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 | `GET/PATCH/DELETE /lists/{id}` · `GET /lists/{id}/count` | count → `{count, wip_exceeded}` |
 | `POST /lists/{id}/duplicate` | duplie la liste : cartes non-archivées avec labels, checklists, champs personnalisés et pièces jointes (**fichiers dupliqués physiquement**) ; dépendances non copiées ; undoable en une opération |
 | `GET /cards/{id}` | détail complet : `{card, labels, checklists:[{…,items}], comments, attachments, custom_fields, dependencies_in/out, schedule}` |
-| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminder`: `"15m"\|"1h"\|"1d"\|"2d"` ou datetime ISO — **`""` = supprimer le rappel** ; tout changement de `due`/`reminder` réarme le rappel |
+| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminder`: `"15m"\|"1h"\|"1d"\|"2d"` ou datetime ISO — **`""` = supprimer le rappel** ; tout changement de `due`/`reminder` réarme le rappel · `time_spent_minutes`: **banque un incrément** (+n, jamais un remplacement) · `tracking_started_at`: `"ISO datetime"` = session de suivi en cours, **`""` = arrêter (banque l'écart depuis le début)** |
 | `DELETE /cards/{id}` | suppression (undoable) |
 | `POST /cards/{id}/move` | `{list_id?, position? \| before? \| after?}` (cross-board ok) |
 | `POST /cards/{id}/duplicate` | copie + enfants |

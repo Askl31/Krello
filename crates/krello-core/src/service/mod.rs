@@ -29,16 +29,24 @@ pub struct Service {
     pub(crate) db: Mutex<Db>,
     pub(crate) events: broadcast::Sender<Event>,
     pub(crate) attachments_dir: PathBuf,
+    /// Board background images (F18), under the data dir: `<data>/backgrounds`.
+    pub(crate) backgrounds_dir: PathBuf,
     pub(crate) undo: Mutex<UndoState>,
 }
 
 impl Service {
     pub fn new(db: Db, attachments_dir: PathBuf) -> Service {
         let (events, _) = broadcast::channel(512);
+        // Les fonds image vivent à côté des pièces jointes: <data>/backgrounds.
+        let backgrounds_dir = attachments_dir
+            .parent()
+            .map(|p| p.join("backgrounds"))
+            .unwrap_or_else(|| attachments_dir.join("backgrounds"));
         Service {
             db: Mutex::new(db),
             events,
             attachments_dir,
+            backgrounds_dir,
             undo: Mutex::new(UndoState::default()),
         }
     }

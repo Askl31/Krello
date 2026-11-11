@@ -31,7 +31,29 @@ fn app_data_dir() -> PathBuf {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn setup_dock_icon() {
+    use objc2::AllocAnyThread;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let icon_bytes = include_bytes!("../icons/icon.png");
+
+    unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
+        let app = NSApplication::sharedApplication(mtm);
+        let data = NSData::with_bytes(icon_bytes);
+        let image = NSImage::initWithData(NSImage::alloc(), &data);
+        if let Some(img) = image {
+            app.setApplicationIconImage(Some(&img));
+        }
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "macos")]
+    setup_dock_icon();
     // Le serveur in-process partage ce processus : la fenêtre native existe,
     // on autorise donc le sélecteur de répertoire natif (Finder/Explorer).
     std::env::set_var("KRELLO_NATIVE_DIALOG", "1");
@@ -42,6 +64,9 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            setup_dock_icon();
+
             let handle = app.handle().clone();
             let service_server = Arc::clone(&service);
             let service_sweep = Arc::clone(&service);

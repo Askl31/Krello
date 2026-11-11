@@ -13,6 +13,10 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
   checklists avec progression, champs personnalisés, pièces jointes, commentaires,
   dates + priorités + filtres, recherche plein-texte, archivage, duplication,
   import/export (JSON/MD/CSV/ICS) et **import d'exports Trello**.
+  **Suivi du temps** : ▶/⏸ sur une carte banque les minutes travaillées
+  (incrément cumulé, session en cours affichée live) — migration 005.
+  **Historique par carte** : section « Activité » dans la modale (flux filtré
+  `card_id`, libellés FR, détail du payload).
 - **Gantt / Timeline (MS Project)** : durées en jours ouvrés, charge, % accompli,
   jalons, dépendances **FS/SS/FF/SF + lag**, **chemin critique** (CPM complet :
   marges, ES/EF/LS/LF), calendriers avec jours fériés, baselines et dérives, WBS,
@@ -114,12 +118,25 @@ calendrier replanifie.
 
 ## Tests
 
-52 tests (smoke, cartes/déplacements/undo, CPM+calendriers+baselines, recherche,
-import/export/automations, IA, intégration HTTP) : `cargo test --workspace`.
+110 tests (smoke, cartes/déplacements/undo, CPM+calendriers+baselines, recherche,
+import/export/automations, IA, intégration HTTP, rappels, récurrence, tracking,
+duplication de listes, garde Host, sauvegardes) : `cargo test --workspace`.
 
 ## Journal des modifications
 
-### v0.1.4 — audit : sécurité renforcée + perfs (N+1, streaming, debounce)
+### v0.1.6 — historique par carte + suivi du temps
+
+- **Historique par carte** : `GET /boards/{id}/activity?card_id=` (filtre SQL
+  `card_id`) + section « Activité » dans la modale carte (libellés FR des kinds,
+  horodatage, détail du payload — déplacement, fichier, récurrence…).
+- **Suivi du temps** (migration 005 : `time_spent_minutes`,
+  `tracking_started_at`) : `PATCH {time_spent_minutes}` **banque un incrément**
+  (jamais un remplacement), `PATCH {tracking_started_at: ""}` arrête la session
+  et banque l'écart depuis le début ; UI ▶/⏸ dans la modale (badge en cours,
+  cumul, rafraîchissement 30 s, purge à la fermeture) ; undo/redo exact par
+  opération.
+
+### v0.1.5 — audit complet : sécurité, perfs, undo étendu, accessibilité + features
 
 - **Garde `Host` anti DNS-rebinding** : toute requête dont l'en-tête `Host`
   n'est pas loopback (`127.0.0.1`, `localhost`, `[::1]`, avec ou sans port)
@@ -130,22 +147,32 @@ import/export/automations, IA, intégration HTTP) : `cargo test --workspace`.
 - **Téléchargement des pièces jointes en streaming** (`ServeFile`) au lieu de
   bufferiser jusqu'à 64 Mo en mémoire ; support des requêtes `Range` (206).
   `Content-Type`/`Content-Disposition` validés et assainis (CRLF retiré).
-- **`GET /boards/{id}/cards/meta`** : métadonnées de tout le board en UNE
-  requête (label_ids, compteurs checklists/items cochés/commentaires/pièces
-  jointes) — l'hydratation des tuiles Kanban passe de N requêtes `GET
-  /cards/{id}` à 1 seule.
-- **N+1 éliminés** : items de checklists chargés en un `IN (...)` partagé
-  (`card_detail`, `list_checklists`) ; exports MD/CSV préparent leurs
-  statements hors des boucles.
-- **Export CSV corrigé** : les labels sont résolus par `card_id`, plus par
-  titre (deux cartes de même titre ne se volaient plus leurs labels).
-- **CPM : un seul recompute** par `POST /boards/{id}/schedule` (l'ancien
-  endpoint en calculait deux) + un seul événement `ScheduleUpdated`.
-- **Palette ⌘K** : recherche FTS debouncée à 150 ms avec garde anti-réponses
-  obsolètes.
-- **Tests** : 78 → 86 (garde token API+WS 401, garde Host 403, 404 JSON API,
-  endpoint `cards/meta`, traversal/limite 64 Mo des pièces jointes, unicité de
-  l'événement de recompute).
+- **N+1 éliminés** : snapshot en masse des cartes (8 requêtes fixes pour
+  `delete_board`/`delete_list`/`export_json`), items de checklists en un
+  `IN (...)`, exports MD/CSV sans `prepare` en boucle, un seul recompute CPM
+  par `POST /schedule`, hydratation frontend en 1 requête, palette ⌘K
+  debouncée.
+- **Undo étendu** : calendriers, baselines (+snapshots), attachments
+  (purge fichier best-effort) ; **récurrence** : la complétion d'une carte
+  récurrente crée l'occurrence suivante, undoable en une opération.
+- **Rappels effectifs** : `reminder` (`15m`/`1h`/`1d`/`2d`) → event WS
+  `ReminderDue` + toast, une seule fois par carte/échéance, réarmé au
+  changement de `due`/`reminder` (migration 004).
+- **Déplacement inter-boards** dans l'UI (sélecteur board+liste dans la
+  modale ; `CardMoved` émis pour les deux boards).
+- **Duplication de liste** : cartes + labels/checklists/champs/WIP, pièces
+  jointes **fichiers dupliqués physiquement**, deps non copiées, undo unifié
+  (`POST /lists/{id}/duplicate`).
+- **Pièces jointes par glisser-déposer** depuis le bureau (multi-fichiers).
+- **Calendrier Mois/Semaine/Jour** (persisté) + vue **« Aujourd'hui »**
+  (retard/aujourd'hui/semaine/prioritaires).
+- **Accessibilité** : `role="dialog"` + `aria-modal` + `aria-label` auto +
+  focus trap + restauration du focus + toasts `role="status"` + alternative
+  clavier au DnD (`<` / `>`).
+- **Token comparé en temps constant** ; `Content-Disposition` assaini (CRLF).
+- **FIX** : `GET /views` renvoie les réglages déjà parsés — `main.js` ne
+  re-parse plus (les réglages de vue n'étaient jamais chargés après reload :
+  zoom/filtres perdus).
 
 ### v0.1.3 — raccourci `N` : carte en langage naturel
 
