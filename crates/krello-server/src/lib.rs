@@ -65,13 +65,13 @@ async fn local_guard(
     }
     let is_api = req.uri().path().starts_with("/api/v1");
     let is_health = req.uri().path() == "/api/v1/health";
-    if let Some(token) = &state.token {
+    if let Some(bearer) = &state.bearer {
         if is_api && !is_health {
             let ok = req
                 .headers()
                 .get(axum::http::header::AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
-                .map(|v| eq_constant_time(v, &format!("Bearer {token}")))
+                .map(|v| eq_constant_time(v, bearer))
                 .unwrap_or(false);
             if !ok {
                 return (
@@ -111,6 +111,7 @@ pub fn make_state(
     Arc::new(AppState {
         service,
         ai: ai.unwrap_or_else(build_ai_provider),
+        bearer: token.as_ref().map(|t| format!("Bearer {t}")),
         token,
     })
 }
@@ -160,6 +161,18 @@ fn mime_for(path: &str) -> &'static str {
     }
 }
 
+/// Serve an embedded asset without copying it: `Body::from_static` borrows the
+/// compile-time `&'static [u8]` directly instead of `to_vec()` per request.
+fn embedded_asset(mime: &'static str, bytes: &'static [u8]) -> Response {
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, mime)
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
+        .body(axum::body::Body::new(http_body_util::Full::new(
+            axum::body::Bytes::from_static(bytes),
+        )))
+        .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::empty()))
+}
+
 
 /// Fallback handler: unknown `/api/*` paths get a JSON 404 (not the SPA
 /// index.html); everything else is served by the embedded frontend handler.
@@ -205,14 +218,7 @@ pub async fn embedded_frontend_handler(uri: axum::http::Uri) -> Response {
     // 2. Recherche dans les assets embarqués à la compilation
     if let Some(f) = FRONTEND_EMBEDDED.get_file(path) {
         let mime = mime_for(f.path().to_str().unwrap_or(""));
-        return (
-            [
-                (axum::http::header::CONTENT_TYPE, mime),
-                (axum::http::header::CACHE_CONTROL, "no-cache"),
-            ],
-            f.contents().to_vec(),
-        )
-            .into_response();
+        return embedded_asset(mime, f.contents());
     }
 
     // 3. Si le chemin a une extension (ex: .js, .css, .svg, .png), c'est un asset manquant : 404 !
@@ -242,14 +248,7 @@ pub async fn embedded_frontend_handler(uri: axum::http::Uri) -> Response {
     }
 
     if let Some(f) = FRONTEND_EMBEDDED.get_file("index.html") {
-        return (
-            [
-                (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (axum::http::header::CACHE_CONTROL, "no-cache"),
-            ],
-            f.contents().to_vec(),
-        )
-            .into_response();
+        return embedded_asset("text/html; charset=utf-8", f.contents());
     }
 
     (axum::http::StatusCode::NOT_FOUND, "index.html introuvable").into_response()

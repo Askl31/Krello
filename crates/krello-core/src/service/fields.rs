@@ -107,9 +107,7 @@ impl Service {
 
     pub fn list_field_defs(&self, board_id: &str) -> Result<Vec<CustomFieldDef>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM custom_field_defs WHERE board_id=?1 ORDER BY position",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM custom_field_defs WHERE board_id=?1 ORDER BY position")?;
         let defs = stmt
             .query_map([board_id], row_field_def)?
             .collect::<rusqlite::Result<_>>()?;

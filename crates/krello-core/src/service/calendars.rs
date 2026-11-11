@@ -112,7 +112,7 @@ impl Service {
             .ok_or_else(|| Error::NotFound(format!("calendar {id}")))?;
         // Boards impactés (leur planning basculera sur le calendrier par défaut).
         let board_ids: Vec<String> = {
-            let mut stmt = db.conn.prepare("SELECT id FROM boards WHERE calendar_id=?1")?;
+            let mut stmt = db.conn.prepare_cached("SELECT id FROM boards WHERE calendar_id=?1")?;
             let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
@@ -133,7 +133,7 @@ impl Service {
 
     pub fn list_calendars(&self) -> Result<Vec<Calendar>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare("SELECT * FROM calendars ORDER BY created_at")?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM calendars ORDER BY created_at")?;
         let cals = stmt
             .query_map([], row_calendar)?
             .collect::<rusqlite::Result<_>>()?;

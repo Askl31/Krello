@@ -64,11 +64,17 @@ impl Service {
         } else {
             "SELECT * FROM boards WHERE archived = 0 ORDER BY created_at"
         };
-        let mut stmt = db.conn.prepare(sql)?;
+        let mut stmt = db.conn.prepare_cached(sql)?;
         let boards = stmt
             .query_map([], row_board)?
             .collect::<rusqlite::Result<_>>()?;
         Ok(boards)
+    }
+
+    /// Number of non-archived boards — cheap COUNT for /health (no full load).
+    pub fn count_boards(&self) -> Result<i64> {
+        let db = self.lock_db()?;
+        Ok(db.conn.query_row("SELECT COUNT(*) FROM boards WHERE archived=0", [], |r| r.get(0))?)
     }
 
     /// Update board partial (title, description, background, calendar, dates…).
@@ -250,7 +256,7 @@ impl Service {
             };
             let lists: Vec<List> = {
                 let mut stmt =
-                    db.conn.prepare("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
+                    db.conn.prepare_cached("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
                 let v = stmt
                     .query_map([id], row_list)?
                     .collect::<rusqlite::Result<_>>()?;
@@ -258,7 +264,7 @@ impl Service {
             };
             // Bulk: un jeu fixe de requêtes au lieu d'un snapshot par carte.
             let cids: Vec<String> = {
-                let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE board_id=?1")?;
+                let mut stmt = db.conn.prepare_cached("SELECT id FROM cards WHERE board_id=?1")?;
                 let v = stmt
                     .query_map([id], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<_>>()?;
@@ -266,9 +272,7 @@ impl Service {
             };
             let cards = snapshot_cards_bulk(&db.conn, &cids)?;
             // purge des fichiers pièces jointes du board
-            let mut st = db.conn.prepare(
-                "SELECT stored_path FROM attachments WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)",
-            )?;
+            let mut st = db.conn.prepare_cached("SELECT stored_path FROM attachments WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)")?;
             let paths: Vec<String> = st
                 .query_map([id], |r| r.get::<_, String>(0))?
                 .collect::<rusqlite::Result<_>>()?;
@@ -311,9 +315,7 @@ impl Service {
     /// Activity feed for ONE card (newest first) — used by the card modal.
     pub fn card_activity(&self, board_id: &str, card_id: &str, limit: i64) -> Result<Vec<Activity>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM activity WHERE board_id=?1 AND card_id=?2 ORDER BY created_at DESC LIMIT ?3",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM activity WHERE board_id=?1 AND card_id=?2 ORDER BY created_at DESC LIMIT ?3")?;
         let acts = stmt
             .query_map(
                 params![board_id, card_id, limit.clamp(1, 500)],
@@ -326,8 +328,10 @@ impl Service {
     /// Deep-copy a board (labels, lists, non-archived cards with children,
     /// custom fields, dependencies, automations). Returns the new board.
     pub fn duplicate_board(&self, id: &str) -> Result<Board> {
-        let db = self.lock_db()?;
-        let src = query_board(&db.conn, id)?
+        let mut guard = self.lock_db()?;
+        let tx = guard.conn.transaction()?;
+        let db = &*tx;
+        let src = query_board(db, id)?
             .ok_or_else(|| Error::NotFound(format!("board {id}")))?;
         let now = now_rfc3339();
         let mut new_board = src.clone();
@@ -335,11 +339,11 @@ impl Service {
         new_board.title = format!("{} (copie)", src.title);
         new_board.created_at = now.clone();
         new_board.updated_at = now;
-        insert_board_row(&db.conn, &new_board)?;
+        insert_board_row(db, &new_board)?;
 
         let mut label_map: std::collections::HashMap<String, String> = Default::default();
         {
-            let mut stmt = db.conn.prepare("SELECT * FROM labels WHERE board_id=?1")?;
+            let mut stmt = db.prepare_cached("SELECT * FROM labels WHERE board_id=?1")?;
             let labels: Vec<Label> = stmt
                 .query_map([id], row_label)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -347,7 +351,7 @@ impl Service {
                 let nid = new_id("label");
                 label_map.insert(l.id.clone(), nid.clone());
                 insert_label_row(
-                    &db.conn,
+                    db,
                     &Label {
                         id: nid,
                         board_id: new_board.id.clone(),
@@ -359,7 +363,7 @@ impl Service {
         let mut list_map: std::collections::HashMap<String, String> = Default::default();
         {
             let mut stmt =
-                db.conn.prepare("SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position")?;
+                db.prepare_cached("SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position")?;
             let lists: Vec<List> = stmt
                 .query_map([id], row_list)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -367,7 +371,7 @@ impl Service {
                 let nid = new_id("list");
                 list_map.insert(l.id.clone(), nid.clone());
                 insert_list_row(
-                    &db.conn,
+                    db,
                     &List {
                         id: nid,
                         board_id: new_board.id.clone(),
@@ -377,107 +381,89 @@ impl Service {
             }
         }
         let mut card_map: std::collections::HashMap<String, String> = Default::default();
-        {
-            let mut stmt = db.conn
-                .prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0 ORDER BY position")?;
-            let cards: Vec<Card> = stmt
+        let cards: Vec<Card> = {
+            let mut stmt = db.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND archived=0 ORDER BY position")?;
+            let v = stmt
                 .query_map([id], row_card)?
                 .collect::<rusqlite::Result<_>>()?;
-            for c in cards {
-                let nid = new_id("card");
-                card_map.insert(c.id.clone(), nid.clone());
-                let mut nc = c.clone();
-                nc.id = nid;
-                nc.board_id = new_board.id.clone();
-                nc.list_id = list_map
-                    .get(&c.list_id)
-                    .cloned()
-                    .unwrap_or_else(|| c.list_id.clone());
-                insert_card_row(&db.conn, &nc)?;
-            }
+            v
+        };
+        for c in &cards {
+            let nid = new_id("card");
+            card_map.insert(c.id.clone(), nid.clone());
+            let mut nc = c.clone();
+            nc.id = nid;
+            nc.board_id = new_board.id.clone();
+            nc.list_id = list_map
+                .get(&c.list_id)
+                .cloned()
+                .unwrap_or_else(|| c.list_id.clone());
+            insert_card_row(db, &nc)?;
         }
-        // labels, checklists, fields
-        {
-            let stmt = db.conn.prepare("SELECT label_id FROM card_labels WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)")?;
-            // handled per card below for simplicity
-            drop(stmt);
-        }
-        {
-            let mut stmt = db.conn.prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0")?;
-            let cards: Vec<Card> = stmt
-                .query_map([id], row_card)?
-                .collect::<rusqlite::Result<_>>()?;
-            for c in cards {
-                let new_cid = &card_map[&c.id];
-                let lids = label_ids_for_card(&db.conn, &c.id)?;
-                for lid in lids {
-                    if let Some(nl) = label_map.get(&lid) {
-                        db.conn.execute(
-                            "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
-                            params![new_cid, nl],
-                        )?;
-                    }
+        // labels, checklists, fields — réutilise `cards` déjà chargé (pas de re-SELECT)
+        for c in &cards {
+            let new_cid = &card_map[&c.id];
+            let lids = label_ids_for_card(db, &c.id)?;
+            for lid in lids {
+                if let Some(nl) = label_map.get(&lid) {
+                    db.execute(
+                        "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+                        params![new_cid, nl],
+                    )?;
                 }
-                let mut stmt = db.conn
-                    .prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
-                let cls: Vec<Checklist> = stmt
-                    .query_map([&c.id], row_checklist)?
+            }
+            let mut stmt = db.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+            let cls: Vec<Checklist> = stmt
+                .query_map([&c.id], row_checklist)?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for cl in cls {
+                let ncl_id = new_id("cl");
+                insert_checklist_row(
+                    db,
+                    &Checklist {
+                        id: ncl_id.clone(),
+                        card_id: new_cid.clone(),
+                        ..cl.clone()
+                    },
+                )?;
+                let mut stmt = db.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
+                let items: Vec<ChecklistItem> = stmt
+                    .query_map([&cl.id], row_checklist_item)?
                     .collect::<rusqlite::Result<_>>()?;
                 drop(stmt);
-                for cl in cls {
-                    let ncl_id = new_id("cl");
-                    insert_checklist_row(
-                        &db.conn,
-                        &Checklist {
-                            id: ncl_id.clone(),
-                            card_id: new_cid.clone(),
-                            ..cl.clone()
+                for it in items {
+                    insert_checklist_item_row(
+                        db,
+                        &ChecklistItem {
+                            id: new_id("cli"),
+                            checklist_id: ncl_id.clone(),
+                            ..it
                         },
                     )?;
-                    let mut stmt = db.conn.prepare(
-                        "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-                    )?;
-                    let items: Vec<ChecklistItem> = stmt
-                        .query_map([&cl.id], row_checklist_item)?
-                        .collect::<rusqlite::Result<_>>()?;
-                    drop(stmt);
-                    for it in items {
-                        insert_checklist_item_row(
-                            &db.conn,
-                            &ChecklistItem {
-                                id: new_id("cli"),
-                                checklist_id: ncl_id.clone(),
-                                ..it
-                            },
-                        )?;
-                    }
                 }
-                let mut stmt = db.conn.prepare(
-                    "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1",
+            }
+            let mut stmt = db.prepare_cached("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
+            let fvs: Vec<CustomFieldValue> = stmt
+                .query_map([&c.id], row_field_value)?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for fv in fvs {
+                db.execute(
+                    "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+                    params![new_cid, fv.field_id, fv.value],
                 )?;
-                let fvs: Vec<CustomFieldValue> = stmt
-                    .query_map([&c.id], row_field_value)?
-                    .collect::<rusqlite::Result<_>>()?;
-                drop(stmt);
-                for fv in fvs {
-                    db.conn.execute(
-                        "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
-                        params![new_cid, fv.field_id, fv.value],
-                    )?;
-                }
             }
         }
         // custom field defs belong to the board: copy as-is (same ids keep values linked)
-        {
-            db.conn.execute(
-                "INSERT INTO custom_field_defs(id,board_id,name,type,options,position,created_at)
-                 SELECT id, ?2, name, type, options, position, created_at FROM custom_field_defs WHERE board_id=?1",
-                params![id, new_board.id],
-            )?;
-        }
+        db.execute(
+            "INSERT INTO custom_field_defs(id,board_id,name,type,options,position,created_at)
+             SELECT id, ?2, name, type, options, position, created_at FROM custom_field_defs WHERE board_id=?1",
+            params![id, new_board.id],
+        )?;
         // dependencies between copied cards
         {
-            let mut stmt = db.conn.prepare("SELECT * FROM dependencies WHERE board_id=?1")?;
+            let mut stmt = db.prepare_cached("SELECT * FROM dependencies WHERE board_id=?1")?;
             let deps: Vec<Dependency> = stmt
                 .query_map([id], row_dependency)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -488,7 +474,7 @@ impl Service {
                     continue;
                 };
                 insert_dependency_row(
-                    &db.conn,
+                    db,
                     &Dependency {
                         id: new_id("dep"),
                         board_id: new_board.id.clone(),
@@ -500,15 +486,14 @@ impl Service {
             }
         }
         // automations
-        {
-            db.conn.execute(
-                "INSERT INTO automations(id,board_id,name,enabled,trigger,conditions,actions,created_at)
-                 SELECT ?2 || '__' || id, ?2, name, enabled, trigger, conditions, actions, ?3
-                 FROM automations WHERE board_id=?1",
-                params![id, new_board.id, now_rfc3339()],
-            )?;
-        }
-        drop(db);
+        db.execute(
+            "INSERT INTO automations(id,board_id,name,enabled,trigger,conditions,actions,created_at)
+             SELECT ?2 || '__' || id, ?2, name, enabled, trigger, conditions, actions, ?3
+             FROM automations WHERE board_id=?1",
+            params![id, new_board.id, now_rfc3339()],
+        )?;
+        tx.commit()?;
+        drop(guard);
         crate::scheduler::recompute_service(self, &new_board.id)?;
         self.push_undo(UndoEntry {
             label: format!("Duplication du board « {} »", src.title),
@@ -523,9 +508,7 @@ impl Service {
     /// Recent activity entries for a board (global feed, newest first).
     pub fn board_activity(&self, board_id: &str, limit: i64) -> Result<Vec<Activity>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM activity WHERE board_id=?1 ORDER BY created_at DESC LIMIT ?2",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM activity WHERE board_id=?1 ORDER BY created_at DESC LIMIT ?2")?;
         let acts = stmt
             .query_map(params![board_id, limit.clamp(1, 500)], row_activity)?
             .collect::<rusqlite::Result<_>>()?;

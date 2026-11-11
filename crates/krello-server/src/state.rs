@@ -10,8 +10,10 @@ pub struct AppState {
     pub ai: Arc<dyn AiProvider>,
     /// Optional bearer token (--token). None = open localhost access.
     pub token: Option<String>,
+    /// Pre-built `Bearer <token>` compared in constant time — avoids
+    /// re-allocating the header string on every /api/v1 request.
+    pub bearer: Option<String>,
 }
-
 pub type SharedState = Arc<AppState>;
 
 pub fn build_ai_provider() -> Arc<dyn AiProvider> {

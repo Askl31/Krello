@@ -109,7 +109,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
     let mut cards: HashMap<String, Card> = HashMap::new();
     {
         let sql = format!("SELECT * FROM cards WHERE id IN ({placeholders})");
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_card)?;
         for r in rows {
             let c: Card = r?;
@@ -119,7 +119,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut label_ids: HashMap<String, Vec<String>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&format!(
+        let mut stmt = conn.prepare_cached(&format!(
             "SELECT card_id, label_id FROM card_labels WHERE card_id IN ({placeholders})"
         ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
@@ -133,7 +133,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut checklists_by_card: HashMap<String, Vec<Checklist>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&sql_for("checklists"))?;
+        let mut stmt = conn.prepare_cached(&sql_for("checklists"))?;
         for r in stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_checklist)? {
             let cl: Checklist = r?;
             checklists_by_card.entry(cl.card_id.clone()).or_default().push(cl);
@@ -148,7 +148,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut comments_by_card: HashMap<String, Vec<Comment>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&sql_for("comments"))?;
+        let mut stmt = conn.prepare_cached(&sql_for("comments"))?;
         for r in stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_comment)? {
             let cm: Comment = r?;
             comments_by_card.entry(cm.card_id.clone()).or_default().push(cm);
@@ -157,7 +157,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut field_values: HashMap<String, Vec<CustomFieldValue>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&format!(
+        let mut stmt = conn.prepare_cached(&format!(
             "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id IN ({placeholders})"
         ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_field_value)?;
@@ -169,7 +169,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut deps_out: HashMap<String, Vec<Dependency>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&format!(
+        let mut stmt = conn.prepare_cached(&format!(
             "SELECT * FROM dependencies WHERE predecessor_id IN ({placeholders})"
         ))?;
         for r in stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_dependency)? {
@@ -179,7 +179,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
     }
     let mut deps_in: HashMap<String, Vec<Dependency>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&format!(
+        let mut stmt = conn.prepare_cached(&format!(
             "SELECT * FROM dependencies WHERE successor_id IN ({placeholders})"
         ))?;
         for r in stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_dependency)? {
@@ -190,7 +190,7 @@ pub fn snapshot_cards_bulk(conn: &Connection, card_ids: &[String]) -> Result<Vec
 
     let mut attachments: HashMap<String, Vec<Attachment>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(&sql_for("attachments"))?;
+        let mut stmt = conn.prepare_cached(&sql_for("attachments"))?;
         for r in stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_attachment)? {
             let a: Attachment = r?;
             attachments.entry(a.card_id.clone()).or_default().push(a);
@@ -233,13 +233,13 @@ pub fn snapshot_card(conn: &Connection, card_id: &str) -> Result<CardSnapshot> {
     let mut checklists = Vec::new();
     {
         let mut stmt =
-            conn.prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+            conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
         let cls: Vec<Checklist> = stmt
             .query_map([card_id], row_checklist)?
             .collect::<rusqlite::Result<_>>()?;
         for cl in cls {
             let mut stmt =
-                conn.prepare("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
+                conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
             let items: Vec<ChecklistItem> = stmt
                 .query_map([&cl.id], row_checklist_item)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -247,7 +247,7 @@ pub fn snapshot_card(conn: &Connection, card_id: &str) -> Result<CardSnapshot> {
         }
     }
     let comments: Vec<Comment> = {
-        let mut stmt = conn.prepare("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
         let v = stmt
             .query_map([card_id], row_comment)?
             .collect::<rusqlite::Result<_>>()?;
@@ -255,28 +255,28 @@ pub fn snapshot_card(conn: &Connection, card_id: &str) -> Result<CardSnapshot> {
     };
     let field_values: Vec<CustomFieldValue> = {
         let mut stmt =
-            conn.prepare("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
+            conn.prepare_cached("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
         let v = stmt
             .query_map([card_id], row_field_value)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let deps_out: Vec<Dependency> = {
-        let mut stmt = conn.prepare("SELECT * FROM dependencies WHERE predecessor_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM dependencies WHERE predecessor_id=?1")?;
         let v = stmt
             .query_map([card_id], row_dependency)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let deps_in: Vec<Dependency> = {
-        let mut stmt = conn.prepare("SELECT * FROM dependencies WHERE successor_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM dependencies WHERE successor_id=?1")?;
         let v = stmt
             .query_map([card_id], row_dependency)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let attachments: Vec<Attachment> = {
-        let mut stmt = conn.prepare("SELECT * FROM attachments WHERE card_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM attachments WHERE card_id=?1")?;
         let v = stmt
             .query_map([card_id], row_attachment)?
             .collect::<rusqlite::Result<_>>()?;
@@ -726,23 +726,23 @@ pub fn insert_baseline_snapshot_row(conn: &Connection, s: &BaselineSnapshot) -> 
 // ---------- queries ----------
 
 pub fn query_card(conn: &Connection, id: &str) -> Result<Option<Card>> {
-    let mut stmt = conn.prepare("SELECT * FROM cards WHERE id=?1")?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM cards WHERE id=?1")?;
     Ok(stmt.query_row([id], row_card).optional()?)
 }
 
 pub fn query_board(conn: &Connection, id: &str) -> Result<Option<Board>> {
-    let mut stmt = conn.prepare("SELECT * FROM boards WHERE id=?1")?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM boards WHERE id=?1")?;
     Ok(stmt.query_row([id], row_board).optional()?)
 }
 
 pub fn query_list(conn: &Connection, id: &str) -> Result<Option<List>> {
-    let mut stmt = conn.prepare("SELECT * FROM lists WHERE id=?1")?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM lists WHERE id=?1")?;
     Ok(stmt.query_row([id], row_list).optional()?)
 }
 
 pub fn label_ids_for_card(conn: &Connection, card_id: &str) -> Result<Vec<String>> {
     let mut stmt =
-        conn.prepare("SELECT label_id FROM card_labels WHERE card_id=?1 ORDER BY label_id")?;
+        conn.prepare_cached("SELECT label_id FROM card_labels WHERE card_id=?1 ORDER BY label_id")?;
     let ids = stmt
         .query_map([card_id], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -771,7 +771,7 @@ impl UndoEntry {
                 UndoAction::CardDeleted(snap) => out.push(snap.card.board_id.clone()),
                 UndoAction::CalendarUpdated { before, .. } => {
                     // Tous les boards utilisant ce calendrier voient leur planning changer.
-                    if let Ok(mut stmt) = conn.prepare("SELECT id FROM boards WHERE calendar_id=?1") {
+                    if let Ok(mut stmt) = conn.prepare_cached("SELECT id FROM boards WHERE calendar_id=?1") {
                         if let Ok(rows) = stmt.query_map([&before.id], |r| r.get::<_, String>(0)) {
                             for r in rows.flatten() {
                                 out.push(r);

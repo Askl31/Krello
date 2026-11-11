@@ -22,7 +22,7 @@ pub trait AiProvider: Send + Sync {
 pub struct AppleIntelligenceProvider {
     helper: Option<std::path::PathBuf>,
     session: HelperSession,
-    cached_status: std::sync::Mutex<Option<AiStatus>>,
+    cached_status: std::sync::Mutex<Option<(AiStatus, std::time::Instant)>>,
 }
 
 impl AppleIntelligenceProvider {
@@ -63,17 +63,19 @@ impl Default for AppleIntelligenceProvider {
 
 impl AiProvider for AppleIntelligenceProvider {
     fn status(&self) -> AiStatus {
-        // Cache after first success to avoid spawning a process per poll;
-        // re-check while unavailable (user may enable Apple Intelligence).
+        // Cache après un succès (évite un spawn de process par poll) ; en cas
+        // d'indisponibilité, re-vérifie au plus toutes les 30 s (l'utilisateur
+        // peut activer Apple Intelligence entre-temps).
+        const NEG_TTL: std::time::Duration = std::time::Duration::from_secs(30);
         let mut cache = self.cached_status.lock().unwrap_or_else(|e| e.into_inner());
-        match &*cache {
-            Some(s) if s.available => s.clone(),
-            _ => {
-                let s = self.status_uncached();
-                *cache = Some(s.clone());
-                s
+        if let Some((s, at)) = &*cache {
+            if s.available || at.elapsed() < NEG_TTL {
+                return s.clone();
             }
         }
+        let s = self.status_uncached();
+        *cache = Some((s.clone(), std::time::Instant::now()));
+        s
     }
 
     fn generate(&self, system: Option<&str>, prompt: &str, max_tokens: Option<u32>) -> Result<String> {

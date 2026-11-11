@@ -124,21 +124,25 @@ impl<'a> TplCtx<'a> {
     /// Replace `{{...}}` placeholders. Unknown placeholders are left as-is.
     fn render(&self, tpl: &str) -> String {
         let mut s = tpl.to_string();
-        let pairs: [(&str, String); 10] = [
-            ("{{card.title}}", self.card.title.clone()),
-            ("{{card.id}}", self.card.id.clone()),
-            ("{{card.description}}", self.card.description.clone()),
-            ("{{card.priority}}", self.card.priority.clone()),
-            ("{{list.title}}", self.list_title.clone()),
-            ("{{board.title}}", self.board_title.clone()),
-            ("{{trigger}}", self.trigger.clone()),
-            ("{{label.name}}", self.label_name.clone()),
-            ("{{date}}", today().to_string()),
-            ("{{now}}", now_rfc3339()),
+        let date = today().to_string();
+        let now = now_rfc3339();
+        // Références empruntées : les champs ne sont remplacés que si le
+        // placeholder est réellement présent dans le template.
+        let pairs: [(&str, &str); 10] = [
+            ("{{card.title}}", &self.card.title),
+            ("{{card.id}}", &self.card.id),
+            ("{{card.description}}", &self.card.description),
+            ("{{card.priority}}", &self.card.priority),
+            ("{{list.title}}", &self.list_title),
+            ("{{board.title}}", &self.board_title),
+            ("{{trigger}}", &self.trigger),
+            ("{{label.name}}", &self.label_name),
+            ("{{date}}", &date),
+            ("{{now}}", &now),
         ];
         for (k, v) in pairs {
             if s.contains(k) {
-                s = s.replace(k, &v);
+                s = s.replace(k, v);
             }
         }
         s
@@ -252,9 +256,7 @@ impl Service {
 
     pub fn list_automations(&self, board_id: &str) -> Result<Vec<Automation>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM automations WHERE board_id=?1 ORDER BY created_at",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM automations WHERE board_id=?1 ORDER BY created_at")?;
         let autos = stmt
             .query_map([board_id], row_automation)?
             .collect::<rusqlite::Result<_>>()?;
@@ -264,9 +266,7 @@ impl Service {
     /// Run log for one rule, most recent first.
     pub fn list_automation_runs(&self, automation_id: &str, limit: i64) -> Result<Vec<AutomationRun>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM automation_runs WHERE automation_id=?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM automation_runs WHERE automation_id=?1 ORDER BY created_at DESC, id DESC LIMIT ?2")?;
         let runs = stmt
             .query_map(params![automation_id, limit], row_automation_run)?
             .collect::<rusqlite::Result<_>>()?;
@@ -276,9 +276,7 @@ impl Service {
     /// Run log for a whole board, most recent first.
     pub fn list_board_automation_runs(&self, board_id: &str, limit: i64) -> Result<Vec<AutomationRun>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM automation_runs WHERE board_id=?1 ORDER BY created_at DESC, id DESC LIMIT ?2",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM automation_runs WHERE board_id=?1 ORDER BY created_at DESC, id DESC LIMIT ?2")?;
         let runs = stmt
             .query_map(params![board_id, limit], row_automation_run)?
             .collect::<rusqlite::Result<_>>()?;
@@ -329,9 +327,7 @@ impl Service {
     ) -> Result<()> {
         let autos = {
             let db = self.lock_db()?;
-            let mut stmt = db.conn.prepare(
-                "SELECT * FROM automations WHERE board_id=?1 AND enabled=1 AND trigger=?2",
-            )?;
+            let mut stmt = db.conn.prepare_cached("SELECT * FROM automations WHERE board_id=?1 AND enabled=1 AND trigger=?2")?;
             let v: Vec<Automation> = stmt
                 .query_map(params![board_id, trigger], row_automation)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -451,11 +447,9 @@ impl Service {
     pub fn fire_due_reminders(&self) -> Result<usize> {
         let now = chrono::Local::now().naive_local();
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT id, board_id, title, due, reminder, reminder_sent_at FROM cards
-             WHERE reminder IS NOT NULL AND reminder != '' AND due IS NOT NULL
-               AND due_complete=0 AND archived=0 AND is_template=0",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT id, board_id, title, due, reminder, reminder_sent_at FROM cards
+         WHERE reminder IS NOT NULL AND reminder != '' AND due IS NOT NULL
+           AND due_complete=0 AND archived=0 AND is_template=0")?;
         let targets: Vec<(String, String, String, String, String, Option<String>)> = {
             let rows = stmt.query_map([], |r| {
                 Ok((
@@ -514,7 +508,7 @@ impl Service {
                 let Ok(Some(card)) = query_card(&db.conn, cid) else {
                     continue;
                 };
-                let mut ctx = serde_json::json!({
+                let ctx = serde_json::json!({
                     "card_id": card.id,
                     "list_id": card.list_id,
                     "trigger": trigger,
@@ -556,7 +550,6 @@ impl Service {
                     &serde_json::json!({ "automation": auto.name, "trigger": trigger }),
                 );
                 count += 1;
-                let _ = &mut ctx;
             }
         }
         for cid in targets {
@@ -578,6 +571,28 @@ impl Service {
         count
     }
 
+    /// From `candidates`, keep only the card ids the rule has NOT run on today.
+    /// One grouped query (ran_today_set) instead of one COUNT per card.
+    fn not_ran_today(
+        &self,
+        automation_id: &str,
+        today_s: &str,
+        candidates: Vec<String>,
+    ) -> Result<Vec<String>> {
+        if candidates.is_empty() {
+            return Ok(candidates);
+        }
+        let ran = {
+            let db = self.lock_db()?;
+            let refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+            ran_today_set(&db.conn, automation_id, today_s, &refs).unwrap_or_default()
+        };
+        Ok(candidates
+            .into_iter()
+            .filter(|cid| !ran.contains(cid))
+            .collect())
+    }
+
     /// Periodic sweep: scheduled_daily / scheduled_weekly / scheduled_monthly /
     /// card_due_soon / card_due. Called by the server on a timer (every minute).
     /// Scheduled triggers fire at most once per day per rule; due triggers once per
@@ -591,10 +606,8 @@ impl Service {
         for board in boards {
             let autos = {
                 let db = self.lock_db()?;
-                let mut stmt = db.conn.prepare(
-                    "SELECT * FROM automations WHERE board_id=?1 AND enabled=1 AND trigger IN
-                     ('scheduled_daily','scheduled_weekly','scheduled_monthly','card_due_soon','card_due')",
-                )?;
+                let mut stmt = db.conn.prepare_cached("SELECT * FROM automations WHERE board_id=?1 AND enabled=1 AND trigger IN
+                 ('scheduled_daily','scheduled_weekly','scheduled_monthly','card_due_soon','card_due')")?;
                 let v: Vec<Automation> = stmt
                     .query_map([&board.id], row_automation)?
                     .collect::<rusqlite::Result<_>>()?;
@@ -660,7 +673,7 @@ impl Service {
                     "card_due_soon" => {
                         let days = conds.get("days").and_then(|d| d.as_i64()).unwrap_or(1);
                         let cards = self.list_cards(&board.id, false)?;
-                        let targets: Vec<String> = cards
+                        let candidates: Vec<String> = cards
                             .into_iter()
                             .filter(|c| {
                                 c.due
@@ -672,22 +685,15 @@ impl Service {
                                     })
                                     .unwrap_or(false)
                             })
-                            .filter(|c| {
-                                let db = self.lock_db().ok();
-                                match db {
-                                    Some(db) => !ran_today(&db.conn, &auto.id, Some(&c.id), &today_s)
-                                        .unwrap_or(false),
-                                    None => true,
-                                }
-                            })
                             .map(|c| c.id)
                             .collect();
+                        let targets = self.not_ran_today(&auto.id, &today_s, candidates)?;
                         total += self.execute_on_cards(&auto, &trigger, &targets, 0);
                     }
                     "card_due" => {
                         // Due date reached or passed (overdue), not completed.
                         let cards = self.list_cards(&board.id, false)?;
-                        let targets: Vec<String> = cards
+                        let candidates: Vec<String> = cards
                             .into_iter()
                             .filter(|c| {
                                 c.due
@@ -696,16 +702,9 @@ impl Service {
                                     .map(|d| days_between(t, d) <= 0 && !c.due_complete)
                                     .unwrap_or(false)
                             })
-                            .filter(|c| {
-                                let db = self.lock_db().ok();
-                                match db {
-                                    Some(db) => !ran_today(&db.conn, &auto.id, Some(&c.id), &today_s)
-                                        .unwrap_or(false),
-                                    None => true,
-                                }
-                            })
                             .map(|c| c.id)
                             .collect();
+                        let targets = self.not_ran_today(&auto.id, &today_s, candidates)?;
                         total += self.execute_on_cards(&auto, &trigger, &targets, 0);
                     }
                     _ => {}
@@ -770,7 +769,7 @@ fn select_targets(service: &Service, auto: &Automation) -> Result<Vec<String>> {
         push(&mut sql, &mut p, "lower(description) LIKE ?", format!("%{}%", sub.to_lowercase()));
     }
     let db = service.lock_db()?;
-    let mut stmt = db.conn.prepare(&sql)?;
+    let mut stmt = db.conn.prepare_cached(&sql)?;
     let ids: Vec<String> = stmt
         .query_map(rusqlite::params_from_iter(p.iter()), |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<_>>()?;
@@ -859,6 +858,30 @@ fn ran_today(
         )?,
     };
     Ok(n > 0)
+}
+
+/// Card ids for which the rule already ran today — one grouped `IN (...)` query
+/// instead of one `COUNT` per candidate card in the scheduled sweep.
+fn ran_today_set(
+    conn: &rusqlite::Connection,
+    automation_id: &str,
+    today_s: &str,
+    card_ids: &[&str],
+) -> Result<std::collections::HashSet<String>> {
+    if card_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let ph = vec!["?"; card_ids.len()].join(",");
+    let sql = format!(
+        "SELECT card_id FROM automation_runs WHERE automation_id=?1 AND substr(created_at,1,10)=?2 AND card_id IN ({ph})"
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let mut params: Vec<&dyn rusqlite::types::ToSql> = Vec::with_capacity(card_ids.len() + 2);
+    params.push(&automation_id);
+    params.push(&today_s);
+    params.extend(card_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql));
+    let rows = stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 fn get_s<'a>(v: &'a serde_json::Value, k: &str) -> Option<&'a str> {
@@ -1113,9 +1136,7 @@ fn apply_action(
                 }
             }
             if k_flag("checklists", true) {
-                let mut st = conn.prepare(
-                    "SELECT * FROM checklists WHERE card_id=?1 ORDER BY position",
-                )?;
+                let mut st = conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
                 let cls: Vec<Checklist> = st
                     .query_map([&card.id], row_checklist)?
                     .collect::<rusqlite::Result<_>>()?;
@@ -1132,7 +1153,7 @@ fn apply_action(
                         },
                     )?;
                     let mut st2 =
-                        conn.prepare("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
+                        conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
                     let items: Vec<ChecklistItem> = st2
                         .query_map([&cl.id], row_checklist_item)?
                         .collect::<rusqlite::Result<_>>()?;

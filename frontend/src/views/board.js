@@ -3,9 +3,9 @@
 import { api } from '../api.js';
 import { escapeHtml, PRIORITY_META } from '../format.js';
 import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
-import { draggable, activeDrag } from '../dnd.js';
+import { draggable, activeDrag, beginDrag, lastPointerY } from '../dnd.js';
 import { toast, promptDialog, confirmDialog, openModal } from '../ui/modal.js';
-import { cardTileHtml, attachCardTile, updateCardTileInDOM } from '../components/card_tile.js';
+import { cardTileHtml, updateCardTileInDOM } from '../components/card_tile.js';
 import { openCardModal } from '../components/card_modal.js';
 import { saveViewSettings } from './view_helpers.js';
 import { icon } from '../icons.js';
@@ -111,13 +111,13 @@ function renderFilters() {
       <span class="kbd" style="font-size:10.5px">?</span>
     </button>`;
 
+  let filterTimer = null;
   bar.querySelector('#f-text').addEventListener('input', (e) => {
     state.filters.text = e.target.value;
-    const pos = e.target.selectionStart;
-    renderLists();
-    const again = host.querySelector('#f-text');
-    again?.focus();
-    again?.setSelectionRange(pos, pos);
+    clearTimeout(filterTimer);
+    // Debounce : renderLists reconstruit toutes les tuiles, inutile à chaque frappe.
+    // (#f-text vit dans #board-filters, hors de #board : jamais détruit, focus conservé.)
+    filterTimer = setTimeout(() => renderLists(), 120);
   });
   bar.querySelector('#f-label').addEventListener('change', (e) => { state.filters.labelId = e.target.value || null; renderLists(); });
   bar.querySelector('#f-priority').addEventListener('change', (e) => { state.filters.priority = e.target.value || null; renderLists(); });
@@ -290,11 +290,8 @@ function listEl(list) {
     </div>
   `;
 
-  // interactions cartes
-  el.querySelectorAll('.card-tile').forEach((tile) => {
-    const card = state.cards.find((c) => c.id === tile.dataset.card);
-    attachCardTile(tile, card, { onChange: reload, onClick: (ev) => boardTileClick(ev, card, tile) });
-  });
+  // Les interactions des tuiles (clic, drag, drop fichiers) sont déléguées sur
+  // document (voir installTileDelegation ci-dessous) : rien à attacher par tuile.
 
   // quick add
   el.querySelector('[data-add-card]').onclick = () => quickAdd(list.id, el.querySelector('.list-body'));
@@ -359,6 +356,85 @@ function boardTileClick(ev, card, tile) {
   applyFocusVisual();
   openCardModal(card.id, { onChange: reload });
 }
+
+// --- Délégation des événements des tuiles de carte ---
+// Un seul jeu de listeners sur document (posé une fois à l'import du module),
+// au lieu de 5 listeners × N tuiles recréés à chaque renderLists().
+function boardTileFromEvent(ev) {
+  const tile = ev.target.closest?.('.card-tile');
+  if (!tile || !tile.closest('#board .list')) return null;
+  const card = state.cards.find((c) => c.id === tile.dataset.card);
+  return card ? { tile, card } : null;
+}
+
+function cardDragOpts(card) {
+  return {
+    kind: 'card',
+    id: card.id,
+    targetSelector: '.list',
+    canDrag: (ev) => !ev.target.closest('button, input, textarea, a'),
+    onDrop: async ({ targetEl }) => {
+      const listEl = targetEl.closest('.list');
+      const targetListId = listEl?.dataset.list;
+      if (!targetListId) return;
+      // position : carte avant laquelle insérer (position du pointeur)
+      const tiles = [...listEl.querySelectorAll('.card-tile')].filter((x) => x.dataset.card !== card.id);
+      const beforeId = tiles.find((x) => x.getBoundingClientRect().bottom > lastPointerY())?.dataset.card || null;
+      try {
+        await window.__krelloMoveCard(card.id, { list_id: targetListId, before: beforeId || undefined });
+        reload();
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    },
+  };
+}
+
+document.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0) return;
+  const t = boardTileFromEvent(ev);
+  if (!t) return;
+  if (ev.target.closest('button, input, textarea, a')) return;
+  beginDrag(t.tile, cardDragOpts(t.card), ev);
+});
+
+document.addEventListener('click', (ev) => {
+  const t = boardTileFromEvent(ev);
+  if (!t) return;
+  boardTileClick(ev, t.card, t.tile);
+});
+
+// Pièces jointes par glisser-déposer de fichiers externes (bureau / explorateur).
+// Le DnD interne utilise Pointer Events : pas de conflit avec le drag HTML5 des fichiers.
+document.addEventListener('dragover', (ev) => {
+  const t = boardTileFromEvent(ev);
+  if (!t) return;
+  if (![...ev.dataTransfer?.types || []].includes('Files')) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+  t.tile.classList.add('file-over');
+});
+document.addEventListener('dragleave', (ev) => {
+  const t = boardTileFromEvent(ev);
+  if (!t) return;
+  t.tile.classList.remove('file-over');
+});
+document.addEventListener('drop', async (ev) => {
+  const t = boardTileFromEvent(ev);
+  if (!t) return;
+  if (![...(ev.dataTransfer?.types || [])].includes('Files')) return;
+  ev.preventDefault();
+  t.tile.classList.remove('file-over');
+  const files = [...ev.dataTransfer.files];
+  if (!files.length) return;
+  let ok = 0, fail = 0;
+  for (const f of files) {
+    try { await api.uploadAttachment(t.card.id, f); ok++; }
+    catch (err) { fail++; toast(err.message, 'err'); }
+  }
+  if (ok) toast(`${ok} pièce(s) jointe(s) ajoutée(s) à « ${t.card.title.slice(0, 30)} »`, 'ok');
+  reload();
+});
 
 function renderSelectionBar() {
   document.getElementById('selection-bar')?.remove();
@@ -811,8 +887,8 @@ export function openShortcutsDialog() {
     </div>`, { size: 'md' });
 }
 
-async function reload() {
-  await refreshBoard();
+async function reload({ refetch = true } = {}) {
+  if (refetch) await refreshBoard();
   const scroller = host?.querySelector('.board-scroller');
   const scrollLeft = scroller?.scrollLeft ?? 0;
   const scrollTop = scroller?.scrollTop ?? 0;

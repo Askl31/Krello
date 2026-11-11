@@ -14,15 +14,14 @@ pub async fn ws_handler(State(state): State<SharedState>, ws: WebSocketUpgrade) 
 
 async fn handle_socket(socket: WebSocket, state: SharedState) {
     let (mut sender, mut receiver) = socket.split();
-    let mut events: broadcast::Receiver<krello_core::events::Event> = state.service.subscribe();
+    let mut events: broadcast::Receiver<krello_core::events::SharedEvent> = state.service.subscribe();
 
     // Forward service events to the client.
     let send_loop = async move {
         loop {
             match events.recv().await {
                 Ok(event) => {
-                    let json = serde_json::to_string(&event).unwrap_or_default();
-                    if sender.send(Message::text(json)).await.is_err() {
+                    if sender.send(Message::text(event.json.as_ref())).await.is_err() {
                         break;
                     }
                 }

@@ -119,11 +119,12 @@ export function renderTimeline() {
   }).join('');
 
   // flèches de dépendances (SVG overlay)
+  // Index cardId -> ligne, construit UNE fois (avant : findIndex O(rows) par dépendance).
+  const rowIndex = new Map(rows.map((r, i) => [r.card.id, i]));
   const depArrows = [];
   for (const d of state.deps) {
-    const fromIdx = rows.findIndex((r) => r.card.id === d.predecessor_id);
-    const toIdx = rows.findIndex((r) => r.card.id === d.successor_id);
-    if (fromIdx === -1 || toIdx === -1) continue;
+    const fromIdx = rowIndex.get(d.predecessor_id) ?? -1;
+    const toIdx = rowIndex.get(d.successor_id) ?? -1;
     const from = rows[fromIdx];
     const to = rows[toIdx];
     const sx = xOf(parseDate(from.dates.end)) + pxPerDay;

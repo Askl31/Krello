@@ -20,14 +20,14 @@ use tokio::sync::broadcast;
 
 use crate::db::Db;
 use crate::error::{Error, Result};
-use crate::events::Event;
+use crate::events::{Event, SharedEvent};
 use crate::undo::{UndoAction, UndoEntry, UndoState, UNDO_CAP};
 
 /// Thread-safe façade over SQLite. All mutations are transactional, emit events,
 /// and push declarative undo entries (capped stack, redo cleared on new edits).
 pub struct Service {
     pub(crate) db: Mutex<Db>,
-    pub(crate) events: broadcast::Sender<Event>,
+    pub(crate) events: broadcast::Sender<SharedEvent>,
     pub(crate) attachments_dir: PathBuf,
     /// Board background images (F18), under the data dir: `<data>/backgrounds`.
     pub(crate) backgrounds_dir: PathBuf,
@@ -51,7 +51,7 @@ impl Service {
         }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Event> {
+    pub fn subscribe(&self) -> broadcast::Receiver<SharedEvent> {
         self.events.subscribe()
     }
 
@@ -60,7 +60,9 @@ impl Service {
     }
 
     pub(crate) fn emit(&self, event: Event) {
-        let _ = self.events.send(event);
+        // Serialize once here; every WS client sends the same bytes.
+        let json: Arc<str> = serde_json::to_string(&event).unwrap_or_default().into();
+        let _ = self.events.send(SharedEvent { event, json });
     }
 
     pub(crate) fn push_undo(&self, entry: UndoEntry) {
@@ -82,15 +84,17 @@ impl Service {
         let Some(entry) = entry else {
             return Ok(None);
         };
-        {
+        let board_ids = {
             let mut db = self.lock_db()?;
             let tx = db.conn.transaction()?;
             entry.apply_undo(&tx)?;
-            for b in entry.schedule_board_ids(&tx) {
-                crate::scheduler::recompute(&tx, &b)?;
+            let board_ids = entry.schedule_board_ids(&tx);
+            for b in &board_ids {
+                crate::scheduler::recompute(&tx, b)?;
             }
             tx.commit()?;
-        }
+            board_ids
+        };
         let label = entry.label.clone();
         // Side-effect filesystem après commit : une pièce jointe dont l'ajout
         // vient d'être annulé n'a plus de ligne en DB → purger son fichier.
@@ -105,7 +109,7 @@ impl Service {
             st.redo.push(entry.clone());
         }
         self.emit(Event::UndoApplied {
-            board_id: entry.schedule_board_ids(&self.lock_db()?.conn).first().cloned(),
+            board_id: board_ids.first().cloned(),
         });
         Ok(Some(label))
     }
@@ -119,15 +123,17 @@ impl Service {
         let Some(entry) = entry else {
             return Ok(None);
         };
-        {
+        let board_ids = {
             let mut db = self.lock_db()?;
             let tx = db.conn.transaction()?;
             entry.apply_redo(&tx)?;
-            for b in entry.schedule_board_ids(&tx) {
-                crate::scheduler::recompute(&tx, &b)?;
+            let board_ids = entry.schedule_board_ids(&tx);
+            for b in &board_ids {
+                crate::scheduler::recompute(&tx, b)?;
             }
             tx.commit()?;
-        }
+            board_ids
+        };
         let label = entry.label.clone();
         // Side-effect filesystem après commit : le redo d'une suppression de
         // pièce jointe re-supprime aussi son fichier.
@@ -142,7 +148,7 @@ impl Service {
             st.undo.push(entry.clone());
         }
         self.emit(Event::UndoApplied {
-            board_id: entry.schedule_board_ids(&self.lock_db()?.conn).first().cloned(),
+            board_id: board_ids.first().cloned(),
         });
         Ok(Some(label))
     }
@@ -178,7 +184,7 @@ impl Service {
 
     pub fn get_view_settings(&self, board_id: &str) -> Result<std::collections::HashMap<String, String>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare("SELECT view, settings FROM board_views WHERE board_id=?1")?;
+        let mut stmt = db.conn.prepare_cached("SELECT view, settings FROM board_views WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -236,7 +242,7 @@ pub(crate) fn next_list_position(conn: &Connection, board_id: &str) -> Result<f6
 pub(crate) fn renormalize_cards(conn: &Connection, list_id: &str) -> Result<()> {
     let ids: Vec<String> = {
         let mut stmt =
-            conn.prepare("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, created_at")?;
+            conn.prepare_cached("SELECT id FROM cards WHERE list_id = ?1 ORDER BY position, created_at")?;
         let v = stmt
             .query_map([list_id], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;
@@ -254,9 +260,7 @@ pub(crate) fn renormalize_cards(conn: &Connection, list_id: &str) -> Result<()> 
 /// Rewrite list positions in a board as 0.0, 1.0, 2.0…
 pub(crate) fn renormalize_lists(conn: &Connection, board_id: &str) -> Result<()> {
     let ids: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM lists WHERE board_id = ?1 AND archived = 0 ORDER BY position, created_at",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT id FROM lists WHERE board_id = ?1 AND archived = 0 ORDER BY position, created_at")?;
         let v = stmt
             .query_map([board_id], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;

@@ -31,3 +31,11 @@ pub enum Event {
     CalendarsUpdated { calendar_id: String },
     UndoApplied { board_id: Option<String> },
 }
+
+/// Broadcast payload: the typed event plus its JSON wire format, serialized once
+/// in `Service::emit` and shared by all WebSocket clients (no per-client re-serialize).
+#[derive(Debug, Clone)]
+pub struct SharedEvent {
+    pub event: Event,
+    pub json: std::sync::Arc<str>,
+}

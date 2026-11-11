@@ -69,7 +69,11 @@ export function openModal(html, { onClose, id, size = 'md' } = {}) {
   };
   syncAriaLabel();
 
+  let closed = false;
   let close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', esc);
     backdrop.style.opacity = '0';
     backdrop.style.transition = 'opacity 0.18s ease';
     const modal = backdrop.querySelector('.modal');
@@ -112,17 +116,13 @@ export function openModal(html, { onClose, id, size = 'md' } = {}) {
     }, 0);
   }
 
+  const esc = (e) => {
+    if (e.key === 'Escape') close();
+  };
   if (!isUpdate) {
     backdrop.addEventListener('pointerdown', (e) => {
       if (e.target === backdrop) close();
     });
-
-    const esc = (e) => {
-      if (e.key === 'Escape') {
-        close();
-        document.removeEventListener('keydown', esc);
-      }
-    };
     document.addEventListener('keydown', esc);
   }
 

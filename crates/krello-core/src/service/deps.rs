@@ -124,7 +124,7 @@ impl Service {
     pub fn list_dependencies(&self, board_id: &str) -> Result<Vec<Dependency>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM dependencies WHERE board_id=?1 ORDER BY created_at")?;
+            db.conn.prepare_cached("SELECT * FROM dependencies WHERE board_id=?1 ORDER BY created_at")?;
         let deps = stmt
             .query_map([board_id], row_dependency)?
             .collect::<rusqlite::Result<_>>()?;
@@ -132,8 +132,11 @@ impl Service {
     }
 
     pub fn schedule_for_board(&self, board_id: &str) -> Result<crate::scheduler::ScheduleSummary> {
-        let db = self.lock_db()?;
-        crate::scheduler::recompute(&db.conn, board_id)
+        let mut db = self.lock_db()?;
+        let tx = db.conn.transaction()?;
+        let summary = crate::scheduler::recompute(&tx, board_id)?;
+        tx.commit()?;
+        Ok(summary)
     }
 }
 
@@ -164,7 +167,7 @@ fn detect_cycle(
     to: &str,
     _kind: &str,
 ) -> Result<()> {
-    let mut stmt = conn.prepare("SELECT predecessor_id, successor_id FROM dependencies WHERE board_id=?1")?;
+    let mut stmt = conn.prepare_cached("SELECT predecessor_id, successor_id FROM dependencies WHERE board_id=?1")?;
     let edges: Vec<(String, String)> = stmt
         .query_map([board_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
@@ -173,20 +176,31 @@ fn detect_cycle(
     for (p, s) in edges {
         adj.entry(p).or_default().push(s);
     }
+    // BFS avec carte de parents : le chemin du cycle est reconstruit au hit
+    // (avant : le chemin entier était cloné à chaque nœud → O(V·E) allocations).
     let mut seen: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(String, Vec<String>)> = VecDeque::new();
-    queue.push_back((from.to_string(), vec![from.to_string()]));
-    while let Some((node, path)) = queue.pop_front() {
+    let mut parent: HashMap<String, String> = HashMap::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    seen.insert(from.to_string());
+    queue.push_back(from.to_string());
+    while let Some(node) = queue.pop_front() {
         if node == to {
+            let mut path = vec![to.to_string()];
+            let mut cur = to.to_string();
+            while cur != from {
+                cur = parent.get(&cur).cloned().unwrap_or_else(|| from.to_string());
+                path.push(cur.clone());
+            }
+            path.reverse();
             return Err(Error::Cycle(path.join(" → ")));
         }
-        if !seen.insert(node.clone()) {
-            continue;
-        }
-        for next in adj.get(&node).cloned().unwrap_or_default() {
-            let mut p = path.clone();
-            p.push(next.clone());
-            queue.push_back((next, p));
+        if let Some(nexts) = adj.get(&node) {
+            for next in nexts {
+                if seen.insert(next.clone()) {
+                    parent.insert(next.clone(), node.clone());
+                    queue.push_back(next.clone());
+                }
+            }
         }
     }
     Ok(())

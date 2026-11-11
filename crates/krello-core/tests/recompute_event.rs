@@ -16,7 +16,7 @@ fn recompute_public_emits_exactly_one_schedule_event() {
     assert_eq!(summary.board_id, board_id);
     let mut count = 0;
     while let Ok(ev) = rx.try_recv() {
-        if matches!(ev, Event::ScheduleUpdated { .. }) {
+        if matches!(ev.event, Event::ScheduleUpdated { .. }) {
             count += 1;
         }
     }

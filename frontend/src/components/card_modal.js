@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { escapeHtml, mdToHtml, fmtDateTime, fmtDate, parseDate, toISODate, PRIORITY_META, LABEL_COLORS } from '../format.js';
 import { openModal, toast, confirmDialog, promptDialog } from '../ui/modal.js';
-import { state, visibleLists } from '../state.js';
+import { state, visibleLists, labelById } from '../state.js';
 import { on } from '../ws.js';
 import { icon } from '../icons.js';
 
@@ -679,7 +679,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
       const ids = [...el.querySelectorAll('[data-label]:checked')].map((c) => c.dataset.label);
       try {
         await api.setCardLabels(card.id, ids);
-        detail.labels = ids.map((id) => state.labels.find((l) => l.id === id)).filter(Boolean);
+        detail.labels = ids.map((id) => labelById(id)).filter(Boolean);
         const cardInState = state.cards.find((x) => x.id === card.id);
         if (cardInState) cardInState._label_ids = ids;
         if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);

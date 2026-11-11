@@ -1325,6 +1325,7 @@ textarea.input {
   opacity: 0.96;
   transform: rotate(2.5deg) scale(1.03);
   backdrop-filter: blur(12px);
+  will-change: translate;
 }
 
 .drop-line {
@@ -2946,7 +2947,7 @@ html[data-style="translucent"] .tb-search-pill {
   font-weight: 500;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  transition: all var(--dur-fast) var(--ease-spring);
+  transition: background-color var(--dur-fast) var(--ease-spring), border-color var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-spring), transform var(--dur-fast) var(--ease-spring), opacity var(--dur-fast) var(--ease-spring);
   cursor: pointer;
 }
 
@@ -3053,7 +3054,7 @@ html[data-style="translucent"] .sidebar-avatar {
 
 html[data-style="translucent"] .sidebar .item {
   border-radius: 12px;
-  transition: all var(--dur-fast) var(--ease-spring);
+  transition: background-color var(--dur-fast) var(--ease-spring), color var(--dur-fast) var(--ease-spring), border-color var(--dur-fast) var(--ease-spring), box-shadow var(--dur-fast) var(--ease-spring), transform var(--dur-fast) var(--ease-spring);
 }
 
 html[data-style="translucent"][data-theme="light"] .sidebar .item.active {

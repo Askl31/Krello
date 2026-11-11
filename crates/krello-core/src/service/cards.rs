@@ -155,7 +155,7 @@ impl Service {
         } else {
             "SELECT * FROM cards WHERE board_id=?1 AND archived=0 ORDER BY list_id, position"
         };
-        let mut stmt = db.conn.prepare(sql)?;
+        let mut stmt = db.conn.prepare_cached(sql)?;
         let cards = stmt
             .query_map([board_id], row_card)?
             .collect::<rusqlite::Result<_>>()?;
@@ -560,8 +560,7 @@ impl Service {
             )?;
         }
         let mut stmt = db
-            .conn
-            .prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+            .conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
         let cls: Vec<Checklist> = stmt
             .query_map([id], row_checklist)?
             .collect::<rusqlite::Result<_>>()?;
@@ -573,9 +572,7 @@ impl Service {
                 ..cl.clone()
             };
             insert_checklist_row(&db.conn, &ncl)?;
-            let mut stmt = db.conn.prepare(
-                "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-            )?;
+            let mut stmt = db.conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
             let items: Vec<ChecklistItem> = stmt
                 .query_map([&cl.id], row_checklist_item)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -591,9 +588,7 @@ impl Service {
                 )?;
             }
         }
-        let mut stmt = db.conn.prepare(
-            "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
         let fvs: Vec<CustomFieldValue> = stmt
             .query_map([id], row_field_value)?
             .collect::<rusqlite::Result<_>>()?;
@@ -663,9 +658,7 @@ impl Service {
     /// All template cards of a board; gallery order = position in their list.
     pub fn list_templates(&self, board_id: &str) -> Result<Vec<Card>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM cards WHERE board_id=?1 AND is_template=1 AND archived=0 ORDER BY position",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND is_template=1 AND archived=0 ORDER BY position")?;
         let v = stmt
             .query_map([board_id], row_card)?
             .collect::<rusqlite::Result<_>>()?;
@@ -759,8 +752,7 @@ impl Service {
         }
         if has(CopySection::Checklists) {
             let mut stmt = db
-                .conn
-                .prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+                .conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
             let cls: Vec<Checklist> = stmt
                 .query_map([id], row_checklist)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -772,9 +764,7 @@ impl Service {
                     ..cl
                 };
                 insert_checklist_row(&db.conn, &ncl)?;
-                let mut stmt = db.conn.prepare(
-                    "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-                )?;
+                let mut stmt = db.conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
                 let items: Vec<ChecklistItem> = stmt
                     .query_map([&cl.id], row_checklist_item)?
                     .collect::<rusqlite::Result<_>>()?;
@@ -795,9 +785,7 @@ impl Service {
             }
         }
         if has(CopySection::CustomFields) {
-            let mut stmt = db.conn.prepare(
-                "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1",
-            )?;
+            let mut stmt = db.conn.prepare_cached("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
             let fvs: Vec<CustomFieldValue> = stmt
                 .query_map([id], row_field_value)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -812,7 +800,7 @@ impl Service {
         let mut att_map: std::collections::HashMap<String, String> = Default::default();
         if has(CopySection::Attachments) || has(CopySection::Cover) {
             std::fs::create_dir_all(&self.attachments_dir)?;
-            let mut stmt = db.conn.prepare("SELECT * FROM attachments WHERE card_id=?1")?;
+            let mut stmt = db.conn.prepare_cached("SELECT * FROM attachments WHERE card_id=?1")?;
             let atts: Vec<Attachment> = stmt
                 .query_map([id], row_attachment)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -921,9 +909,7 @@ impl Service {
         let card = self.get_card(id)?;
         let db = self.lock_db()?;
         let labels: Vec<Label> = {
-            let mut stmt = db.conn.prepare(
-                "SELECT l.* FROM labels l JOIN card_labels cl ON cl.label_id = l.id WHERE cl.card_id=?1",
-            )?;
+            let mut stmt = db.conn.prepare_cached("SELECT l.* FROM labels l JOIN card_labels cl ON cl.label_id = l.id WHERE cl.card_id=?1")?;
             let v = stmt
                 .query_map([id], row_label)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -931,8 +917,7 @@ impl Service {
         };
         let checklists: Vec<serde_json::Value> = {
             let mut stmt = db
-                .conn
-                .prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+                .conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
             let cls: Vec<Checklist> = stmt
                 .query_map([id], row_checklist)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -950,7 +935,7 @@ impl Service {
         };
         let comments: Vec<Comment> = {
             let mut stmt =
-                db.conn.prepare("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
+                db.conn.prepare_cached("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
             let v = stmt
                 .query_map([id], row_comment)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -958,16 +943,14 @@ impl Service {
         };
         let attachments: Vec<Attachment> = {
             let mut stmt =
-                db.conn.prepare("SELECT * FROM attachments WHERE card_id=?1 ORDER BY created_at")?;
+                db.conn.prepare_cached("SELECT * FROM attachments WHERE card_id=?1 ORDER BY created_at")?;
             let v = stmt
                 .query_map([id], row_attachment)?
                 .collect::<rusqlite::Result<_>>()?;
             v
         };
         let custom_fields: serde_json::Map<String, serde_json::Value> = {
-            let mut stmt = db.conn.prepare(
-                "SELECT field_id, value FROM custom_field_values WHERE card_id=?1",
-            )?;
+            let mut stmt = db.conn.prepare_cached("SELECT field_id, value FROM custom_field_values WHERE card_id=?1")?;
             let pairs: Vec<(String, String)> = {
                 let v = stmt
                     .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -982,7 +965,7 @@ impl Service {
         };
         let deps_out: Vec<Dependency> = {
             let mut stmt =
-                db.conn.prepare("SELECT * FROM dependencies WHERE predecessor_id=?1")?;
+                db.conn.prepare_cached("SELECT * FROM dependencies WHERE predecessor_id=?1")?;
             let v = stmt
                 .query_map([id], row_dependency)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -990,7 +973,7 @@ impl Service {
         };
         let deps_in: Vec<Dependency> = {
             let mut stmt =
-                db.conn.prepare("SELECT * FROM dependencies WHERE successor_id=?1")?;
+                db.conn.prepare_cached("SELECT * FROM dependencies WHERE successor_id=?1")?;
             let v = stmt
                 .query_map([id], row_dependency)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -998,8 +981,7 @@ impl Service {
         };
         let schedule: Option<ScheduleEntry> = {
             let mut stmt = db
-                .conn
-                .prepare("SELECT * FROM schedule_cache WHERE card_id=?1")?;
+                .conn.prepare_cached("SELECT * FROM schedule_cache WHERE card_id=?1")?;
             stmt.query_row([id], row_schedule).optional()?
         };
         Ok(serde_json::json!({
@@ -1025,11 +1007,9 @@ impl Service {
 
         let mut label_ids: HashMap<String, Vec<String>> = HashMap::new();
         {
-            let mut stmt = c.prepare(
-                "SELECT cl.card_id, cl.label_id FROM card_labels cl
-                 JOIN cards cd ON cd.id = cl.card_id
-                 WHERE cd.board_id=?1 AND cd.archived=0",
-            )?;
+            let mut stmt = c.prepare_cached("SELECT cl.card_id, cl.label_id FROM card_labels cl
+             JOIN cards cd ON cd.id = cl.card_id
+             WHERE cd.board_id=?1 AND cd.archived=0")?;
             let rows = stmt.query_map([board_id], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?;
@@ -1041,14 +1021,12 @@ impl Service {
         // items_total / items_done per card (LEFT JOIN keeps cards without checklists)
         let mut cl_items: HashMap<String, (i64, i64, i64)> = HashMap::new();
         {
-            let mut stmt = c.prepare(
-                "SELECT ch.card_id, COUNT(DISTINCT ch.id), COUNT(i.id), COALESCE(SUM(i.checked), 0)
-                 FROM checklists ch
-                 JOIN cards cd ON cd.id = ch.card_id
-                 LEFT JOIN checklist_items i ON i.checklist_id = ch.id
-                 WHERE cd.board_id=?1 AND cd.archived=0
-                 GROUP BY ch.card_id",
-            )?;
+            let mut stmt = c.prepare_cached("SELECT ch.card_id, COUNT(DISTINCT ch.id), COUNT(i.id), COALESCE(SUM(i.checked), 0)
+             FROM checklists ch
+             JOIN cards cd ON cd.id = ch.card_id
+             LEFT JOIN checklist_items i ON i.checklist_id = ch.id
+             WHERE cd.board_id=?1 AND cd.archived=0
+             GROUP BY ch.card_id")?;
             let rows = stmt.query_map([board_id], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -1064,11 +1042,9 @@ impl Service {
         }
         let mut comments_count: HashMap<String, i64> = HashMap::new();
         {
-            let mut stmt = c.prepare(
-                "SELECT card_id, COUNT(*) FROM comments
-                 WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
-                 GROUP BY card_id",
-            )?;
+            let mut stmt = c.prepare_cached("SELECT card_id, COUNT(*) FROM comments
+             WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
+             GROUP BY card_id")?;
             let rows = stmt.query_map([board_id], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
             })?;
@@ -1079,11 +1055,9 @@ impl Service {
         }
         let mut attachments_count: HashMap<String, i64> = HashMap::new();
         {
-            let mut stmt = c.prepare(
-                "SELECT card_id, COUNT(*) FROM attachments
-                 WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
-                 GROUP BY card_id",
-            )?;
+            let mut stmt = c.prepare_cached("SELECT card_id, COUNT(*) FROM attachments
+             WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
+             GROUP BY card_id")?;
             let rows = stmt.query_map([board_id], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
             })?;
@@ -1095,9 +1069,7 @@ impl Service {
 
         let mut card_ids: Vec<String> = Vec::new();
         {
-            let mut stmt = c.prepare(
-                "SELECT id FROM cards WHERE board_id=?1 AND archived=0",
-            )?;
+            let mut stmt = c.prepare_cached("SELECT id FROM cards WHERE board_id=?1 AND archived=0")?;
             let rows = stmt.query_map([board_id], |r| r.get::<_, String>(0))?;
             for r in rows {
                 card_ids.push(r?);

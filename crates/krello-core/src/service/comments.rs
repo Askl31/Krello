@@ -76,7 +76,7 @@ impl Service {
     pub fn list_comments(&self, card_id: &str) -> Result<Vec<Comment>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
+            db.conn.prepare_cached("SELECT * FROM comments WHERE card_id=?1 ORDER BY created_at")?;
         let comments = stmt
             .query_map([card_id], row_comment)?
             .collect::<rusqlite::Result<_>>()?;

@@ -26,7 +26,7 @@ fn reminder_fires_once_then_stays_silent() {
 
     let mut rx = s.subscribe();
     assert_eq!(s.fire_due_reminders().unwrap(), 1, "un seul rappel émis");
-    assert!(matches!(rx.try_recv(), Ok(Event::ReminderDue { .. })));
+    assert!(matches!(rx.try_recv(), Ok(se) if matches!(se.event, Event::ReminderDue { .. })));
     assert_eq!(s.fire_due_reminders().unwrap(), 0, "pas de doublon au second sweep");
     let card = s.get_card(&c.id).unwrap();
     assert!(card.reminder_sent_at.is_some(), "bookkeeping posé");

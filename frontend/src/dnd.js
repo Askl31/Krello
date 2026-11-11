@@ -6,8 +6,7 @@ function makeGhost(el, x, y) {
   const ghost = el.cloneNode(true);
   ghost.classList.add('drag-ghost');
   ghost.style.width = `${el.offsetWidth}px`;
-  ghost.style.left = `${x - 14}px`;
-  ghost.style.top = `${y - 14}px`;
+  ghost.style.translate = `${x - 14}px ${y - 14}px`;
   document.body.appendChild(ghost);
   return ghost;
 }
@@ -53,75 +52,102 @@ export function draggable(el, opts) {
   el.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
     if (opts.canDrag && !opts.canDrag(ev)) return;
-    const start = { x: ev.clientX, y: ev.clientY };
-    let moved = false;
-    let ghost = null;
-    let currentTarget = null;
-
-    const cleanup = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('keydown', onEsc);
-      document.querySelector('.drop-line')?.remove();
-    };
-
-    const endDrag = (e, cancelled) => {
-      cleanup();
-      if (!moved) return; // simple clic
-      ghost?.remove();
-      el.classList.remove('dragging');
-      active = null;
-
-      if (!cancelled && currentTarget) {
-        currentTarget.classList.remove('drop-over', 'drag-over');
-        opts.onDrop({ x: e.clientX, y: e.clientY, targetEl: currentTarget, ev });
-      }
-    };
-
-    const onMove = (e) => {
-      if (!moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
-      if (!moved) {
-        moved = true;
-        ghost = makeGhost(el, e.clientX, e.clientY);
-        el.classList.add('dragging');
-        active = { type: opts.kind, id: opts.id };
-      }
-      ghost.style.left = `${e.clientX - 16}px`;
-      ghost.style.top = `${e.clientY - 16}px`;
-
-      const zones = document.querySelectorAll(opts.targetSelector);
-      let found = null;
-      for (const z of zones) {
-        const r = z.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-          found = z;
-          break;
-        }
-      }
-
-      if (currentTarget && currentTarget !== found) {
-        currentTarget.classList.remove('drop-over', 'drag-over');
-      }
-      currentTarget = found;
-      if (found) {
-        found.classList.add(opts.kind === 'card' ? 'drag-over' : 'drop-over');
-      }
-
-      if (opts.kind === 'card') {
-        updateDropIndicator(found, e.clientY, el);
-      }
-    };
-
-    const onUp = (e) => endDrag(e, false);
-    const onCancel = () => endDrag({ clientX: start.x, clientY: start.y }, true);
-    const onEsc = (e) => { if (e.key === 'Escape') onCancel(); };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('keydown', onEsc);
+    beginDrag(el, opts, ev);
   });
+}
+
+/**
+ * Start a drag session for `el`. Used by `draggable` (per element) and by the
+ * board's delegated listeners, which resolve the tile from the event target.
+ */
+export function beginDrag(el, opts, ev) {
+  const start = { x: ev.clientX, y: ev.clientY };
+  let moved = false;
+  let ghost = null;
+  let currentTarget = null;
+  let raf = 0;
+  let lastEvt = null;
+
+  const cleanup = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('keydown', onEsc);
+    document.querySelector('.drop-line')?.remove();
+  };
+
+  const endDrag = (e, cancelled) => {
+    cleanup();
+    if (!moved) return; // simple clic
+    ghost?.remove();
+    el.classList.remove('dragging');
+    active = null;
+
+    if (!cancelled && currentTarget) {
+      currentTarget.classList.remove('drop-over', 'drag-over');
+      opts.onDrop({ x: e.clientX, y: e.clientY, targetEl: currentTarget, ev });
+    }
+  };
+
+  const handleMove = (e) => {
+    if (!moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
+    if (!moved) {
+      moved = true;
+      ghost = makeGhost(el, e.clientX, e.clientY);
+      el.classList.add('dragging');
+      active = { type: opts.kind, id: opts.id };
+    }
+    ghost.style.translate = `${e.clientX - 16}px ${e.clientY - 16}px`;
+
+    const zones = document.querySelectorAll(opts.targetSelector);
+    let found = null;
+    for (const z of zones) {
+      const r = z.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        found = z;
+        break;
+      }
+    }
+
+    if (currentTarget && currentTarget !== found) {
+      currentTarget.classList.remove('drop-over', 'drag-over');
+    }
+    currentTarget = found;
+    if (found) {
+      found.classList.add(opts.kind === 'card' ? 'drag-over' : 'drop-over');
+    }
+
+    if (opts.kind === 'card') {
+      updateDropIndicator(found, e.clientY, el);
+    }
+  };
+  // Coalesce les pointermove (peuvent dépasser 120 Hz) en un traitement par frame.
+  const onMove = (e) => {
+    lastEvt = e;
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      handleMove(lastEvt);
+    });
+  };
+
+  const onUp = (e) => endDrag(e, false);
+  const onCancel = () => endDrag({ clientX: start.x, clientY: start.y }, true);
+  const onEsc = (e) => { if (e.key === 'Escape') onCancel(); };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  window.addEventListener('keydown', onEsc);
+}
+
+// Dernière position Y du pointeur (utilisée pour calculer before/after au drop).
+let lastY = 0;
+window.addEventListener('pointermove', (e) => { lastY = e.clientY; });
+export function lastPointerY() {
+  return lastY;
 }
 
 export function activeDrag() {

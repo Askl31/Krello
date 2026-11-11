@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml, toISODate, fmtDate, parseDate, fmtDateShort } from '../format.js';
-import { state, refreshBoard } from '../state.js';
+import { state, refreshBoard, labelById } from '../state.js';
 import { draggable } from '../dnd.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
@@ -60,7 +60,7 @@ export function renderCalendar() {
             <div class="daynum">${d.getDate()}</div>
             ${cards.map((c) => {
               const labelColor = (c._label_ids || []).length
-                ? state.labels.find((l) => l.id === c._label_ids[0])?.color : null;
+                ? labelById(c._label_ids[0])?.color : null;
               return `<button class="cal-card" data-card="${c.id}" title="${escapeHtml(c.title)}">
                 ${labelColor ? `<span class="lbl" style="background:${labelColor}"></span>` : ''}
                 ${c.due_complete ? `<span style="color:var(--success);margin-right:3px">✓</span>` : ''}
@@ -75,12 +75,9 @@ export function renderCalendar() {
   host.querySelector('#cal-next').onclick = () => shift(1);
   host.querySelector('#cal-today').onclick = () => { cursor = new Date(); persist(); renderCalendar(); };
 
+  // Une seule passe sur les .cal-card : clic = modale, drag = replanifier.
   host.querySelectorAll('.cal-card').forEach((b) => {
     b.addEventListener('click', () => openCardModal(b.dataset.card, { onChange: rerender }));
-  });
-
-  // drag & drop des cartes du calendrier
-  host.querySelectorAll('.cal-card').forEach((b) => {
     const card = state.cards.find((c) => c.id === b.dataset.card);
     draggable(b, {
       kind: 'card',

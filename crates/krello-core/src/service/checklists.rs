@@ -50,7 +50,7 @@ impl Service {
             .optional()?
             .ok_or_else(|| Error::NotFound(format!("checklist {id}")))?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
+            db.conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
         let items: Vec<ChecklistItem> = stmt
             .query_map([id], row_checklist_item)?
             .collect::<rusqlite::Result<_>>()?;
@@ -73,7 +73,7 @@ impl Service {
     pub fn list_checklists(&self, card_id: &str) -> Result<Vec<(Checklist, Vec<ChecklistItem>)>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+            db.conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
         let cls: Vec<Checklist> = stmt
             .query_map([card_id], row_checklist)?
             .collect::<rusqlite::Result<_>>()?;
@@ -225,7 +225,7 @@ pub(crate) fn items_for_checklists(
     let sql = format!(
         "SELECT * FROM checklist_items WHERE checklist_id IN ({placeholders}) ORDER BY checklist_id, position"
     );
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
     let ids: Vec<&str> = checklist_ids.iter().map(|s| s.as_str()).collect();
     let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_checklist_item)?;
     for r in rows {

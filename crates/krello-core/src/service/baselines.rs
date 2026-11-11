@@ -55,8 +55,7 @@ impl Service {
             )?;
             snapshots = {
                 let mut stmt = db
-                    .conn
-                    .prepare("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
+                    .conn.prepare_cached("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
                 let v = stmt
                     .query_map([&baseline.id], row_baseline_snapshot)?
                     .collect::<rusqlite::Result<_>>()?;
@@ -79,7 +78,7 @@ impl Service {
     pub fn list_baselines(&self, board_id: &str) -> Result<Vec<Baseline>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM baselines WHERE board_id=?1 ORDER BY created_at DESC")?;
+            db.conn.prepare_cached("SELECT * FROM baselines WHERE board_id=?1 ORDER BY created_at DESC")?;
         let bases = stmt
             .query_map([board_id], row_baseline)?
             .collect::<rusqlite::Result<_>>()?;
@@ -95,8 +94,7 @@ impl Service {
         // Lire les snapshots AVANT le DELETE (cascade FK).
         let snapshots: Vec<BaselineSnapshot> = {
             let mut stmt = db
-                .conn
-                .prepare("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
+                .conn.prepare_cached("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
             let v = stmt
                 .query_map([id], row_baseline_snapshot)?
                 .collect::<rusqlite::Result<_>>()?;
@@ -131,14 +129,12 @@ impl Service {
         if exists.is_none() {
             return Err(Error::NotFound(format!("baseline {baseline_id}")));
         }
-        let mut stmt = db.conn.prepare(
-            "SELECT s.card_id, s.start, s.due, s.duration_days, s.work_hours,
-                    c.start, c.due, c.duration_days, c.work_hours, c.title
-             FROM baseline_snapshots s
-             LEFT JOIN cards c ON c.id = s.card_id
-             WHERE s.baseline_id=?1
-             ORDER BY s.due NULLS LAST",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT s.card_id, s.start, s.due, s.duration_days, s.work_hours,
+                c.start, c.due, c.duration_days, c.work_hours, c.title
+         FROM baseline_snapshots s
+         LEFT JOIN cards c ON c.id = s.card_id
+         WHERE s.baseline_id=?1
+         ORDER BY s.due NULLS LAST")?;
         let rows = stmt.query_map([baseline_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -184,9 +180,7 @@ impl Service {
     /// Convenience: current cards of a board, sans modèles (export/dashboard).
     pub fn cards_for_dashboard(&self, board_id: &str) -> Result<Vec<Card>> {
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare(
-            "SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY due NULLS LAST",
-        )?;
+        let mut stmt = db.conn.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY due NULLS LAST")?;
         let cards = stmt
             .query_map([board_id], row_card)?
             .collect::<rusqlite::Result<_>>()?;

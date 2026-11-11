@@ -53,7 +53,9 @@ async function renderRoute() {
       initSidebar(document.getElementById('sidebar'));
       initTopbarShortcuts();
     }
-    await loadBoards();
+    const full = reloadFull;
+    reloadFull = true;
+    if (full) await loadBoards();
 
     if (route.startsWith('#/b/')) {
       const [, , boardId, view = 'board'] = route.split('/');
@@ -61,18 +63,20 @@ async function renderRoute() {
         // Toujours recharger : les événements WS et les mutations locales
         // doivent refléter l'état serveur (listes, cartes, deps, schedule).
         await loadBoard(boardId);
-        const allSettings = {};
-        try {
-          const views = await api.get(`/api/v1/boards/${boardId}/views`);
-          for (const v of views) {
-            // GET /views renvoie `settings` déjà parsé en objet (le TEXT est
-            // déserialisé côté serveur) — gérer aussi une string historique.
-            allSettings[v.view] = typeof v.settings === 'string'
-              ? JSON.parse(v.settings || '{}')
-              : (v.settings || {});
-          }
-        } catch { /* optionnel */ }
-        loadViewSettings(allSettings);
+        if (full) {
+          const allSettings = {};
+          try {
+            const views = await api.get(`/api/v1/boards/${boardId}/views`);
+            for (const v of views) {
+              // GET /views renvoie `settings` déjà parsé en objet (le TEXT est
+              // déserialisé côté serveur) — gérer aussi une string historique.
+              allSettings[v.view] = typeof v.settings === 'string'
+                ? JSON.parse(v.settings || '{}')
+                : (v.settings || {});
+            }
+          } catch { /* optionnel */ }
+          loadViewSettings(allSettings);
+        }
       } catch (e) {
         document.getElementById('main').innerHTML =
           `<div class="empty-state"><div class="big">🌫</div><p>Board introuvable : ${e.message}</p></div>`;
@@ -108,7 +112,7 @@ async function renderRoute() {
           case 'settings': renderSettings(); break;
           default: {
             if (document.querySelector('#board') && window.__krelloReloadBoard) {
-              window.__krelloReloadBoard();
+              window.__krelloReloadBoard({ refetch: false });
             } else {
               renderBoard();
             }
@@ -201,22 +205,25 @@ async function renderRoute() {
 
 // Réactivité WS : rechargement ciblé selon les événements serveur.
 let reloadTimer = null;
-function scheduleReload() {
+let reloadFull = true;
+function scheduleReload(full = true) {
+  reloadFull = full;
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => renderRoute(), 150);
 }
 
 on('*', (evt) => {
   const t = evt.type;
-  if (['CardCreated', 'CardUpdated', 'CardMoved', 'CardDeleted', 'LabelsUpdated',
+  // Seuls les événements de board / resync justifient de recharger la liste des
+  // boards et les vues enregistrées ; un event carte/liste ne refait que
+  // loadBoard + le re-render de la vue courante.
+  const full = ['BoardCreated', 'BoardDeleted', 'BoardUpdated', 'resync',
+    'AutomationsUpdated', 'AutomationRan', 'BaselinesUpdated', 'CalendarsUpdated'].includes(t);
+  if (full || ['CardCreated', 'CardUpdated', 'CardMoved', 'CardDeleted', 'LabelsUpdated',
     'ChecklistsUpdated', 'CommentsUpdated', 'AttachmentsUpdated', 'FieldsUpdated',
-    'DependenciesUpdated', 'ScheduleUpdated', 'UndoApplied', 'resync',
-    'ListCreated', 'ListUpdated', 'ListDeleted', 'BoardUpdated'].includes(t)) {
-    scheduleReload();
-  } else if (t === 'BoardDeleted' || t === 'BoardCreated') {
-    scheduleReload();
-  } else if (t === 'AutomationsUpdated' || t === 'AutomationRan' || t === 'BaselinesUpdated') {
-    scheduleReload();
+    'DependenciesUpdated', 'ScheduleUpdated', 'UndoApplied',
+    'ListCreated', 'ListUpdated', 'ListDeleted'].includes(t)) {
+    scheduleReload(full);
   }
 });
 
@@ -229,12 +236,23 @@ on('ReminderDue', ({ title, due }) => {
 
 // Accessibilité : réplique title → aria-label sur les contrôles sans libellé
 // accessible (l'app génère beaucoup de boutons icônes via innerHTML).
-new MutationObserver(() => {
-  document.querySelectorAll('[title]:not([aria-label])').forEach((n) => {
-    if (n.matches('.iconbtn, button, [role="button"]') && !n.textContent.trim()) {
+new MutationObserver((muts) => {
+  // Ne traiter que les nœuds réellement ajoutés (et leurs descendants) :
+  // scanner tout document.body à chaque mutation costait cher pendant les drags.
+  const labelIfIcon = (n) => {
+    if (n.nodeType !== 1) return;
+    if (n.matches('[title]:not([aria-label])') && n.matches('.iconbtn, button, [role="button"]') && !n.textContent.trim()) {
       n.setAttribute('aria-label', n.getAttribute('title'));
     }
-  });
+    n.querySelectorAll?.('[title]:not([aria-label])').forEach((c) => {
+      if (c.matches('.iconbtn, button, [role="button"]') && !c.textContent.trim()) {
+        c.setAttribute('aria-label', c.getAttribute('title'));
+      }
+    });
+  };
+  for (const m of muts) {
+    for (const n of m.addedNodes) labelIfIcon(n);
+  }
 }).observe(document.body, { childList: true, subtree: true });
 
 emit('app.boot');

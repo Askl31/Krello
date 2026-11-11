@@ -1,6 +1,17 @@
 // Bibliothèque d'icônes SVG légères et cohérentes pour Krello.
 
+const iconCache = new Map();
 export function icon(name, { size = 16, className = '' } = {}) {
+  const key = `${name}|${size}|${className}`;
+  let v = iconCache.get(key);
+  if (v === undefined) {
+    v = renderIcon(name, size, className);
+    iconCache.set(key, v);
+  }
+  return v;
+}
+
+function renderIcon(name, size, className) {
   const s = size;
   const cls = className ? `class="icon-svg ${className}"` : 'class="icon-svg"';
   const defs = {

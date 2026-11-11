@@ -90,7 +90,7 @@ pub fn search_cards(
     args.push(Box::new(f.limit.clamp(1, 500)));
     sql.push_str(&format!(" LIMIT ?{}", args.len()));
 
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare_cached(&sql)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> =
         args.iter().map(|b| b.as_ref() as &dyn rusqlite::types::ToSql).collect();
     let cards = stmt
@@ -114,10 +114,8 @@ pub fn search_global(conn: &rusqlite::Connection, q: &str, limit: i64) -> Result
 /// Lightweight suggestions for the ⌘K palette (titles only, prefix match).
 pub fn suggest_cards(conn: &rusqlite::Connection, q: &str, limit: i64) -> Result<Vec<Card>> {
     let like = format!("%{}%", q.replace('%', "").to_lowercase());
-    let mut stmt = conn.prepare(
-        "SELECT * FROM cards WHERE archived=0 AND is_template=0 AND LOWER(title) LIKE ?1
-         ORDER BY updated_at DESC LIMIT ?2",
-    )?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM cards WHERE archived=0 AND is_template=0 AND LOWER(title) LIKE ?1
+     ORDER BY updated_at DESC LIMIT ?2")?;
     let cards = stmt
         .query_map(params![like, limit.clamp(1, 20)], row_card)?
         .collect::<rusqlite::Result<_>>()?;

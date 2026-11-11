@@ -164,14 +164,14 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
     let cal = calendar_for(conn, board.calendar_id.as_deref())?;
     let mut cards: Vec<Card> = {
         let mut stmt =
-            conn.prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0")?;
+            conn.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0")?;
         let v = stmt
             .query_map([board_id], row_card)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let deps: Vec<Dependency> = {
-        let mut stmt = conn.prepare("SELECT * FROM dependencies WHERE board_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM dependencies WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], row_dependency)?
             .collect::<rusqlite::Result<_>>()?;
@@ -180,9 +180,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
 
     // WBS: list order then card position.
     let list_order: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT id FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position")?;
         let v = stmt
             .query_map([board_id], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;
@@ -201,9 +199,12 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     {
-        let mut stmt = conn.prepare("UPDATE cards SET wbs=?2 WHERE id=?1")?;
+        let mut stmt = conn.prepare_cached("UPDATE cards SET wbs=?2 WHERE id=?1")?;
         for (i, c) in cards.iter().enumerate() {
-            stmt.execute(params![c.id, (i + 1).to_string()])?;
+            let wbs = (i + 1).to_string();
+            if c.wbs != wbs {
+                stmt.execute(params![c.id, wbs])?;
+            }
         }
     }
 
@@ -288,7 +289,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
 
     // Forward pass.
     for id in &topo {
-        let preds = nodes.get(id).unwrap().preds.clone();
+        let preds = &nodes.get(id).unwrap().preds;
         let constraint_start = {
             let n = nodes.get(id).unwrap();
             match (n.card.constraint_type.as_str(), &n.card.constraint_date) {
@@ -314,7 +315,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
             es_candidates.push(s);
         }
         let span = nodes.get(id).unwrap().span;
-        for (pred_id, kind, lag) in &preds {
+        for (pred_id, kind, lag) in preds {
             let p = nodes.get(pred_id).unwrap();
             let lag_i = *lag as i64;
             match kind.as_str() {
@@ -374,10 +375,10 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
 
     // Backward pass (reverse topological order).
     for id in topo.iter().rev() {
-        let succs = nodes.get(id).unwrap().succs.clone();
+        let succs = &nodes.get(id).unwrap().succs;
         let span = nodes.get(id).unwrap().span;
         let mut lf_candidates: Vec<NaiveDate> = vec![project_finish];
-        for (succ_id, kind, lag) in &succs {
+        for (succ_id, kind, lag) in succs {
             let s = nodes.get(succ_id).unwrap();
             let lag_i = *lag as i64;
             match kind.as_str() {
@@ -429,11 +430,10 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
     // Persist schedule cache + summary.
     conn.execute("DELETE FROM schedule_cache WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)", [board_id])?;
     {
-        let mut stmt = conn.prepare(
-            "INSERT INTO schedule_cache(card_id, es, ef, ls, lf, total_float_days, is_critical, computed_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-        )?;
+        let mut stmt = conn.prepare_cached("INSERT INTO schedule_cache(card_id, es, ef, ls, lf, total_float_days, is_critical, computed_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)")?;
         let mut entries = Vec::with_capacity(nodes.len());
+        let now = crate::time::now_rfc3339();
         for n in nodes.values() {
             let (es, ef, ls, lf) = (n.es, n.ef, n.ls, n.lf);
             let float = match (ef, lf) {
@@ -447,7 +447,6 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
                 _ => 0.0,
             };
             let critical = float.abs() < 0.5;
-            let now = crate::time::now_rfc3339();
             stmt.execute(params![
                 n.card.id,
                 es.map(fmt_date),
@@ -456,7 +455,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
                 lf.map(fmt_date),
                 float,
                 critical as i64,
-                now
+                &now
             ])?;
             entries.push(ScheduleEntry {
                 card_id: n.card.id.clone(),
@@ -483,16 +482,17 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
 
 /// Service-level convenience: lock the DB and recompute.
 pub fn recompute_service(service: &crate::service::Service, board_id: &str) -> Result<ScheduleSummary> {
-    let db = service.lock_db()?;
-    recompute(&db.conn, board_id)
+    let mut db = service.lock_db()?;
+    let tx = db.conn.transaction()?;
+    let summary = recompute(&tx, board_id)?;
+    tx.commit()?;
+    Ok(summary)
 }
 
 /// Read the persisted schedule without recomputing.
 pub fn cached_schedule(conn: &Connection, board_id: &str) -> Result<Vec<ScheduleEntry>> {
-    let mut stmt = conn.prepare(
-        "SELECT s.* FROM schedule_cache s JOIN cards c ON c.id = s.card_id
-         WHERE c.board_id=?1 ORDER BY c.position",
-    )?;
+    let mut stmt = conn.prepare_cached("SELECT s.* FROM schedule_cache s JOIN cards c ON c.id = s.card_id
+     WHERE c.board_id=?1 ORDER BY c.position")?;
     let entries = {
         let v = stmt
             .query_map([board_id], row_schedule)?

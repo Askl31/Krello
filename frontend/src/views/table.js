@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml, fmtDateShort, PRIORITY_META } from '../format.js';
-import { state, visibleLists, effectiveDates, refreshBoard } from '../state.js';
+import { state, visibleLists, effectiveDates, refreshBoard, labelById } from '../state.js';
 import { toast } from '../ui/modal.js';
 import { openCardModal } from '../components/card_modal.js';
 import { icon } from '../icons.js';
@@ -18,7 +18,7 @@ export function renderTable() {
   const prevScrollLeft = prevScroller?.scrollLeft;
   const lists = visibleLists();
   const listById = (id) => lists.find((l) => l.id === id);
-  const labelNames = (c) => (c._label_ids || []).map((id) => state.labels.find((l) => l.id === id)?.name).filter(Boolean).join(', ');
+  const labelNames = (c) => (c._label_ids || []).map((id) => labelById(id)?.name).filter(Boolean).join(', ');
 
   let cards = state.cards.filter((c) => !c.archived && !c.is_template);
   const get = {
@@ -34,11 +34,15 @@ export function renderTable() {
     labels: (c) => labelNames(c),
     milestone: (c) => (c.is_milestone ? 0 : 1),
   };
-  cards.sort((a, b) => {
-    const va = get[sortKey]?.(a), vb = get[sortKey]?.(b);
-    const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+  // Clés précalculées : évite d'appeler get[sortKey] (jusqu'à O(n) via
+  // effectiveDates/scheduleFor) à CHAQUE comparaison.
+  const getter = get[sortKey];
+  const keyed = cards.map((c) => ({ c, k: getter ? getter(c) : '' }));
+  keyed.sort((a, b) => {
+    const cmp = a.k < b.k ? -1 : a.k > b.k ? 1 : 0;
     return cmp * sortDir;
   });
+  cards = keyed.map((x) => x.c);
 
   const cols = [
     ['wbs', 'WBS'], ['title', 'Titre'], ['list', 'Liste'], ['labels', 'Labels'],

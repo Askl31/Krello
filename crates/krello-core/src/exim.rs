@@ -78,15 +78,15 @@ pub fn export_board(
 pub fn export_json(conn: &Connection, board_id: &str) -> Result<String> {
     let board = query_board(conn, board_id)?
         .ok_or_else(|| Error::NotFound(format!("board {board_id}")))?;
-    let cards: Vec<Card> = {
-        let mut stmt = conn.prepare("SELECT * FROM cards WHERE board_id=?1 ORDER BY position")?;
+    // Bulk: un jeu fixe de requêtes (le format du dump est inchangé).
+    // On ne charge que les ids : snapshot_cards_bulk re-lit les lignes en groupé.
+    let card_ids: Vec<String> = {
+        let mut stmt = conn.prepare_cached("SELECT id FROM cards WHERE board_id=?1 ORDER BY position")?;
         let v = stmt
-            .query_map([board_id], row_card)?
+            .query_map([board_id], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
-    // Bulk: un jeu fixe de requêtes (le format du dump est inchangé).
-    let card_ids: Vec<String> = cards.iter().map(|c| c.id.clone()).collect();
     let card_payloads: Vec<serde_json::Value> = snapshot_cards_bulk(conn, &card_ids)?
         .into_iter()
         .map(|snap| {
@@ -100,35 +100,35 @@ pub fn export_json(conn: &Connection, board_id: &str) -> Result<String> {
         })
         .collect();
     let lists: Vec<List> = {
-        let mut stmt = conn.prepare("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
         let v = stmt
             .query_map([board_id], row_list)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let labels: Vec<Label> = {
-        let mut stmt = conn.prepare("SELECT * FROM labels WHERE board_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM labels WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], row_label)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let deps: Vec<Dependency> = {
-        let mut stmt = conn.prepare("SELECT * FROM dependencies WHERE board_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM dependencies WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], row_dependency)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let field_defs: Vec<CustomFieldDef> = {
-        let mut stmt = conn.prepare("SELECT * FROM custom_field_defs WHERE board_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM custom_field_defs WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], row_field_def)?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
     let automations: Vec<Automation> = {
-        let mut stmt = conn.prepare("SELECT * FROM automations WHERE board_id=?1")?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM automations WHERE board_id=?1")?;
         let v = stmt
             .query_map([board_id], row_automation)?
             .collect::<rusqlite::Result<_>>()?;
@@ -166,9 +166,7 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
 
     // Bulk-load in a fixed number of queries: no per-row prepare/queries.
     let lists: Vec<List> = {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position")?;
         let v = stmt
             .query_map([&board.id], row_list)?
             .collect::<rusqlite::Result<_>>()?;
@@ -176,9 +174,7 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
     };
     let mut cards_by_list: HashMap<String, Vec<Card>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY list_id, position",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY list_id, position")?;
         for r in stmt.query_map([&board.id], row_card)? {
             let c: Card = r?;
             cards_by_list.entry(c.list_id.clone()).or_default().push(c);
@@ -187,7 +183,7 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
     let mut label_names: HashMap<String, String> = HashMap::new();
     {
         let mut stmt =
-            conn.prepare("SELECT id, COALESCE(NULLIF(name, ''), color) FROM labels WHERE board_id=?1")?;
+            conn.prepare_cached("SELECT id, COALESCE(NULLIF(name, ''), color) FROM labels WHERE board_id=?1")?;
         for r in stmt.query_map([&board.id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })? {
@@ -197,11 +193,9 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
     }
     let mut label_ids_by_card: HashMap<String, Vec<String>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT cl.card_id, cl.label_id FROM card_labels cl
-             JOIN cards cd ON cd.id = cl.card_id
-             WHERE cd.board_id=?1 AND cd.archived=0",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT cl.card_id, cl.label_id FROM card_labels cl
+         JOIN cards cd ON cd.id = cl.card_id
+         WHERE cd.board_id=?1 AND cd.archived=0")?;
         for r in stmt.query_map([&board.id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })? {
@@ -211,12 +205,10 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
     }
     let mut checklists_by_card: HashMap<String, Vec<Checklist>> = HashMap::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT ch.* FROM checklists ch
-             JOIN cards cd ON cd.id = ch.card_id
-             WHERE cd.board_id=?1 AND cd.archived=0
-             ORDER BY ch.card_id, ch.position",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT ch.* FROM checklists ch
+         JOIN cards cd ON cd.id = ch.card_id
+         WHERE cd.board_id=?1 AND cd.archived=0
+         ORDER BY ch.card_id, ch.position")?;
         for r in stmt.query_map([&board.id], row_checklist)? {
             let cl: Checklist = r?;
             checklists_by_card.entry(cl.card_id.clone()).or_default().push(cl);
@@ -323,13 +315,11 @@ fn export_csv(conn: &Connection, board: &Board) -> Result<String> {
     );
     // card id first: labels resolve by card_id, never by title (not unique).
     let rows: Vec<CsvRow> = {
-        let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, l.title, c.priority, c.start, c.due, c.pct_complete,
-                    c.duration_days, c.work_hours, c.wbs, c.is_milestone, c.description
-             FROM cards c JOIN lists l ON l.id = c.list_id
-             WHERE c.board_id=?1 AND c.archived=0 AND c.is_template=0
-             ORDER BY l.position, c.position",
-        )?;
+        let mut stmt = conn.prepare_cached("SELECT c.id, c.title, l.title, c.priority, c.start, c.due, c.pct_complete,
+                c.duration_days, c.work_hours, c.wbs, c.is_milestone, c.description
+         FROM cards c JOIN lists l ON l.id = c.list_id
+         WHERE c.board_id=?1 AND c.archived=0 AND c.is_template=0
+         ORDER BY l.position, c.position")?;
         let v = stmt
             .query_map([&board.id], |r| {
                 Ok((
@@ -350,12 +340,25 @@ fn export_csv(conn: &Connection, board: &Board) -> Result<String> {
             .collect::<rusqlite::Result<_>>()?;
         v
     };
-    let mut label_stmt = conn.prepare(
-        "SELECT COALESCE(group_concat(COALESCE(NULLIF(name,''), color), ', '), '')
-         FROM labels WHERE id IN (SELECT label_id FROM card_labels WHERE card_id=?1)",
-    )?;
+    // Labels de toutes les cartes en UNE requête groupée (avant : 1 requête par carte).
+    let mut labels_by_card: std::collections::HashMap<String, String> = Default::default();
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT cl.card_id, COALESCE(group_concat(COALESCE(NULLIF(l.name,''), l.color), ', '), '')
+             FROM card_labels cl
+             JOIN labels l ON l.id = cl.label_id
+             JOIN cards c ON c.id = cl.card_id
+             WHERE c.board_id=?1 AND c.archived=0 AND c.is_template=0
+             GROUP BY cl.card_id",
+        )?;
+        let rows = stmt.query_map([&board.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (cid, names) = r?;
+            labels_by_card.insert(cid, names);
+        }
+    }
     for (card_id, title, list, priority, start, due, pct, dur, work, wbs, milestone, desc) in rows {
-        let labels: String = label_stmt.query_row([&card_id], |r| r.get(0))?;
+        let labels = labels_by_card.get(&card_id).cloned().unwrap_or_default();
         out.push_str(&format!(
             "{};{};{};{};{};{};{};{};{};{};{};{}\n",
             csv_escape(&title),
@@ -386,7 +389,7 @@ fn export_ics(conn: &Connection, board: &Board) -> Result<String> {
     let mut out = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Krello//FR\r\nCALSCALE:GREGORIAN\r\n");
     let cards: Vec<Card> = {
         let mut stmt =
-            conn.prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND due IS NOT NULL")?;
+            conn.prepare_cached("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND due IS NOT NULL")?;
         let v = stmt
             .query_map([&board.id], row_card)?
             .collect::<rusqlite::Result<_>>()?;
@@ -444,7 +447,9 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
     let mut label_map: std::collections::HashMap<String, String> = Default::default();
 
     {
-        let db = service.lock_db()?;
+        let mut guard = service.lock_db()?;
+        let tx = guard.conn.transaction()?;
+        let db = &*tx;
         if let Some(lists) = doc.get("lists").and_then(|v| v.as_array()) {
             for l in lists {
                 let old: List = serde_json::from_value(l.clone())
@@ -452,7 +457,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let nid = crate::ids::new_id("list");
                 list_map.insert(old.id.clone(), nid.clone());
                 insert_list_row(
-                    &db.conn,
+                    db,
                     &List { id: nid, board_id: new_board.id.clone(), ..old },
                 )?;
             }
@@ -464,7 +469,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let nid = crate::ids::new_id("label");
                 label_map.insert(old.id.clone(), nid.clone());
                 crate::undo::insert_label_row(
-                    &db.conn,
+                    db,
                     &Label { id: nid, board_id: new_board.id.clone(), ..old },
                 )?;
             }
@@ -474,7 +479,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let old: CustomFieldDef = serde_json::from_value(d.clone())
                     .map_err(|e| Error::Validation(format!("champ invalide: {e}")))?;
                 crate::service::fields::insert_field_def_row(
-                    &db.conn,
+                    db,
                     &CustomFieldDef { board_id: new_board.id.clone(), ..old },
                 )?;
             }
@@ -490,7 +495,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                     continue;
                 }
                 crate::undo::insert_card_row(
-                    &db.conn,
+                    db,
                     &Card {
                         id: nid.clone(),
                         board_id: new_board.id.clone(),
@@ -501,10 +506,8 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 for lid in cp.get("label_ids").and_then(|v| v.as_array()).into_iter().flatten() {
                     if let Some(old_id) = lid.as_str() {
                         if let Some(new_id) = label_map.get(old_id) {
-                            db.conn.execute(
-                                "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
-                                params![nid, new_id],
-                            )?;
+                            db.execute("INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+                            params![nid, new_id],)?;
                         }
                     }
                 }
@@ -517,7 +520,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                         .map_err(|e| Error::Validation(format!("checklist invalide: {e}")))?;
                         let ncl = crate::ids::new_id("cl");
                         crate::undo::insert_checklist_row(
-                            &db.conn,
+                            db,
                             &Checklist { id: ncl.clone(), card_id: nid.clone(), ..cl.clone() },
                         )?;
                         if let Some(items) = clv.get(1).and_then(|v| v.as_array()) {
@@ -525,7 +528,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                                 let item: ChecklistItem = serde_json::from_value(it.clone())
                                     .map_err(|e| Error::Validation(format!("élément invalide: {e}")))?;
                                 crate::undo::insert_checklist_item_row(
-                                    &db.conn,
+                                    db,
                                     &ChecklistItem { id: crate::ids::new_id("cli"), checklist_id: ncl.clone(), ..item },
                                 )?;
                             }
@@ -536,10 +539,8 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                     for fv in fvs {
                         let v: CustomFieldValue = serde_json::from_value(fv.clone())
                             .map_err(|e| Error::Validation(format!("valeur invalide: {e}")))?;
-                        db.conn.execute(
-                            "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
-                            params![nid, v.field_id, v.value],
-                        )?;
+                        db.execute("INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+                        params![nid, v.field_id, v.value],)?;
                     }
                 }
                 if let Some(coms) = cp.get("comments").and_then(|v| v.as_array()) {
@@ -547,7 +548,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                         let c: Comment = serde_json::from_value(cv.clone())
                             .map_err(|e| Error::Validation(format!("commentaire invalide: {e}")))?;
                         crate::undo::insert_comment_row(
-                            &db.conn,
+                            db,
                             &Comment { id: crate::ids::new_id("com"), card_id: nid.clone(), ..c },
                         )?;
                     }
@@ -562,7 +563,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let s = card_map.get(&d.successor_id).cloned();
                 if let (Some(p), Some(s)) = (p, s) {
                     crate::undo::insert_dependency_row(
-                        &db.conn,
+                        db,
                         &Dependency {
                             id: crate::ids::new_id("dep"),
                             board_id: new_board.id.clone(),
@@ -597,10 +598,12 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 if crate::service::automations::validate_actions(&a.actions).is_ok()
                     && crate::service::automations::validate_conditions(&a.conditions).is_ok()
                 {
-                    crate::service::automations::insert_automation_row(&db.conn, &a)?;
+                    crate::service::automations::insert_automation_row(db, &a)?;
                 }
             }
         }
+        tx.commit()?;
+        drop(guard);
     }
     crate::scheduler::recompute_service(service, &new_board.id)?;
     service.emit(crate::events::Event::BoardCreated {
@@ -674,7 +677,9 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
     let mut card_map: std::collections::HashMap<String, String> = Default::default();
 
     {
-        let db = service.lock_db()?;
+        let mut guard = service.lock_db()?;
+        let tx = guard.conn.transaction()?;
+        let db = &*tx;
         // labels
         if let Some(labels) = doc.get("labels").and_then(|v| v.as_array()) {
             for l in labels {
@@ -687,7 +692,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let nid = crate::ids::new_id("label");
                 label_map.insert(id, nid.clone());
                 crate::undo::insert_label_row(
-                    &db.conn,
+                    db,
                     &Label {
                         id: nid,
                         board_id: new_board.id.clone(),
@@ -735,7 +740,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let nid = crate::ids::new_id("cf");
                 cf_map.insert(id, nid.clone());
                 crate::service::fields::insert_field_def_row(
-                    &db.conn,
+                    db,
                     &CustomFieldDef {
                         id: nid,
                         board_id: new_board.id.clone(),
@@ -764,7 +769,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let nid = crate::ids::new_id("list");
                 list_map.insert(id, nid.clone());
                 crate::undo::insert_list_row(
-                    &db.conn,
+                    db,
                     &List {
                         id: nid,
                         board_id: new_board.id.clone(),
@@ -835,15 +840,13 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                     updated_at: now.clone(),
                     completed_at: if due_complete { Some(now) } else { None },
                 };
-                crate::undo::insert_card_row(&db.conn, &card)?;
+                crate::undo::insert_card_row(db, &card)?;
                 if let Some(lids) = c.get("idLabels").and_then(|v| v.as_array()) {
                     for lid in lids {
                         if let Some(old) = lid.as_str() {
                             if let Some(new_id) = label_map.get(old) {
-                                db.conn.execute(
-                                    "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
-                                    params![&nid, new_id],
-                                )?;
+                                db.execute("INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+                                params![&nid, new_id],)?;
                             }
                         }
                     }
@@ -860,10 +863,8 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                             })
                             .unwrap_or_default();
                         if let Some(new_fid) = cf_map.get(fid) {
-                            db.conn.execute(
-                                "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
-                                params![&nid, new_fid, value],
-                            )?;
+                            db.execute("INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+                            params![&nid, new_fid, value],)?;
                         }
                     }
                 }
@@ -880,7 +881,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                 let name = cl.get("name").and_then(|v| v.as_str()).unwrap_or("Checklist").to_string();
                 let ncl = crate::ids::new_id("cl");
                 crate::undo::insert_checklist_row(
-                    &db.conn,
+                    db,
                     &Checklist {
                         id: ncl.clone(),
                         card_id: card_id.clone(),
@@ -899,7 +900,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                         }
                         let state = it.get("state").and_then(|v| v.as_str()).unwrap_or("incomplete");
                         crate::undo::insert_checklist_item_row(
-                            &db.conn,
+                            db,
                             &ChecklistItem {
                                 id: crate::ids::new_id("cli"),
                                 checklist_id: ncl.clone(),
@@ -936,7 +937,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                     continue;
                 }
                 crate::undo::insert_comment_row(
-                    &db.conn,
+                    db,
                     &Comment {
                         id: crate::ids::new_id("com"),
                         card_id,
@@ -950,6 +951,8 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                 )?;
             }
         }
+        tx.commit()?;
+        drop(guard);
     }
     crate::scheduler::recompute_service(service, &new_board.id)?;
     service.emit(crate::events::Event::BoardCreated {

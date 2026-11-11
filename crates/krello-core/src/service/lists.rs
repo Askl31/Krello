@@ -63,7 +63,7 @@ impl Service {
         } else {
             "SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position"
         };
-        let mut stmt = db.conn.prepare(sql)?;
+        let mut stmt = db.conn.prepare_cached(sql)?;
         let lists = stmt
             .query_map([board_id], row_list)?
             .collect::<rusqlite::Result<_>>()?;
@@ -122,7 +122,7 @@ impl Service {
         let board_id = list.board_id.clone();
         // Bulk: un jeu fixe de requêtes au lieu d'un snapshot par carte.
         let ids: Vec<String> = {
-            let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE list_id=?1")?;
+            let mut stmt = db.conn.prepare_cached("SELECT id FROM cards WHERE list_id=?1")?;
             let v = stmt
                 .query_map([id], |r| r.get::<_, String>(0))?
                 .collect::<rusqlite::Result<_>>()?;
@@ -148,9 +148,11 @@ impl Service {
     /// physically duplicated so deletion of one list never breaks the other).
     /// Dependencies are NOT copied. Undoable as one operation.
     pub fn duplicate_list(&self, id: &str) -> Result<List> {
-        let db = self.lock_db()?;
+        let mut guard = self.lock_db()?;
+        let tx = guard.conn.transaction()?;
+        let db = &*tx;
         let src =
-            query_list(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("list {id}")))?;
+            query_list(db, id)?.ok_or_else(|| Error::NotFound(format!("list {id}")))?;
 
         let new_list = List {
             id: new_id("list"),
@@ -162,20 +164,19 @@ impl Service {
             created_at: now_rfc3339(),
             updated_at: now_rfc3339(),
         };
-        insert_list_row(&db.conn, &new_list)?;
-        renormalize_lists(&db.conn, &src.board_id)?;
+        insert_list_row(db, &new_list)?;
+        renormalize_lists(db, &src.board_id)?;
 
         // Snapshot bulk des cartes non-archivées (labels/checklists/champs/PJ inclus).
         let ids: Vec<String> = {
-            let mut stmt = db
-                .conn
-                .prepare("SELECT id FROM cards WHERE list_id=?1 AND archived=0 ORDER BY position")?;
+            let mut stmt =
+                db.prepare_cached("SELECT id FROM cards WHERE list_id=?1 AND archived=0 ORDER BY position")?;
             let v = stmt
                 .query_map([id], |r| r.get::<_, String>(0))?
                 .collect::<rusqlite::Result<_>>()?;
             v
         };
-        let snaps = snapshot_cards_bulk(&db.conn, &ids)?;
+        let snaps = snapshot_cards_bulk(db, &ids)?;
 
         let mut actions = vec![UndoAction::ListCreated(new_list.clone())];
         for (i, snap) in snaps.iter().enumerate() {
@@ -187,11 +188,11 @@ impl Service {
             card.reminder_sent_at = None;
             card.created_at = now_rfc3339();
             card.updated_at = now_rfc3339();
-            insert_card_row(&db.conn, &card)?;
+            insert_card_row(db, &card)?;
             actions.push(UndoAction::CardCreated(card.clone()));
 
             for lid in &snap.label_ids {
-                db.conn.execute(
+                db.execute(
                     "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
                     params![&card.id, lid],
                 )?;
@@ -202,10 +203,10 @@ impl Service {
                     card_id: card.id.clone(),
                     ..cl.clone()
                 };
-                insert_checklist_row(&db.conn, &ncl)?;
+                insert_checklist_row(db, &ncl)?;
                 for it in items {
                     insert_checklist_item_row(
-                        &db.conn,
+                        db,
                         &ChecklistItem {
                             id: new_id("cli"),
                             checklist_id: ncl.id.clone(),
@@ -215,7 +216,7 @@ impl Service {
                 }
             }
             for fv in &snap.field_values {
-                db.conn.execute(
+                db.execute(
                     "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
                     params![&card.id, fv.field_id, fv.value],
                 )?;
@@ -249,17 +250,18 @@ impl Service {
                     is_cover: att.is_cover,
                     created_at: now_rfc3339(),
                 };
-                insert_attachment_row(&db.conn, &na)?;
+                insert_attachment_row(db, &na)?;
             }
         }
         log_activity(
-            &db.conn,
+            db,
             &src.board_id,
             None,
             "list_duplicated",
             &serde_json::json!({ "source": src.id, "cards": snaps.len() }),
         )?;
-        drop(db);
+        tx.commit()?;
+        drop(guard);
 
         self.push_undo(UndoEntry {
             label: format!("Duplication de la liste « {} »", src.title),

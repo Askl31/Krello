@@ -98,16 +98,17 @@ export async function loadBoards() {
 }
 
 export async function loadBoard(boardId) {
-  const [board, lists, cards, labels, fields, deps] = await Promise.all([
+  // schedule démarre en parallèle des 6 autres requêtes (évite un RTT séquentiel).
+  const scheduleP = api.schedule(boardId).catch(() => null);
+  const [board, lists, cards, labels, fields, deps, schedule] = await Promise.all([
     api.board(boardId),
     api.lists(boardId),
     api.cards(boardId, true),
     api.labels(boardId),
     api.fields(boardId),
     api.deps(boardId),
+    scheduleP,
   ]);
-  let schedule = null;
-  try { schedule = await api.schedule(boardId); } catch { /* pas de dates */ }
   Object.assign(state, { board, lists, cards, labels, fields, deps, schedule });
   applyBoardBackground(board.background);
   emit('board.loaded', boardId);
@@ -133,8 +134,20 @@ export function listById(id) {
   return state.lists.find((l) => l.id === id);
 }
 
+// Cache mémoïsé des labels par id — invalidé automatiquement quand loadBoard
+// réassigne state.labels (WeakMap indexée sur le tableau).
+const labelsMapCache = new WeakMap();
+export function labelsMap() {
+  let m = labelsMapCache.get(state.labels);
+  if (!m) {
+    m = new Map(state.labels.map((l) => [l.id, l]));
+    labelsMapCache.set(state.labels, m);
+  }
+  return m;
+}
+
 export function labelById(id) {
-  return state.labels.find((l) => l.id === id);
+  return labelsMap().get(id);
 }
 
 export function scheduleFor(cardId) {
@@ -149,22 +162,42 @@ export function effectiveDates(card) {
   return { start, end, critical: !!s?.is_critical, float: s?.total_float_days ?? null };
 }
 
+const EMPTY_CARDS = [];
+// Cache mémoïsé du groupement cartes filtrées par liste — invalidé quand
+// loadBoard réassigne state.cards (WeakMap) ou quand les filtres changent.
+const byListCache = new WeakMap();
+export function cardsByList() {
+  const f = state.filters;
+  const sig = JSON.stringify(f);
+  let entry = byListCache.get(state.cards);
+  if (!entry || entry.sig !== sig) {
+    let cards = state.cards.filter((c) => f.includeArchived || !c.archived);
+    if (f.text) {
+      const t = f.text.toLowerCase();
+      cards = cards.filter((c) => c.title.toLowerCase().includes(t) || c.description.toLowerCase().includes(t));
+    }
+    if (f.labelId) cards = cards.filter((c) => deps_hasLabel(c, f.labelId));
+    if (f.priority) cards = cards.filter((c) => c.priority === f.priority);
+    if (f.due === 'overdue') cards = cards.filter((c) => c.due && !c.due_complete && new Date(c.due) < new Date());
+    if (f.due === 'week') {
+      const limit = new Date(Date.now() + 7 * 86400000);
+      cards = cards.filter((c) => c.due && !c.due_complete && new Date(c.due) <= limit);
+    }
+    const map = new Map();
+    for (const c of cards) {
+      let arr = map.get(c.list_id);
+      if (!arr) { arr = []; map.set(c.list_id, arr); }
+      arr.push(c);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.position - b.position);
+    entry = { sig, map };
+    byListCache.set(state.cards, entry);
+  }
+  return entry.map;
+}
+
 export function cardsOfList(listId) {
-  const { text, labelId, priority, due } = state.filters;
-  let cards = state.cards.filter((c) => c.list_id === listId && (state.filters.includeArchived || !c.archived));
-  if (text) {
-    const t = text.toLowerCase();
-    cards = cards.filter((c) => c.title.toLowerCase().includes(t) || c.description.toLowerCase().includes(t));
-  }
-  if (labelId) cards = cards.filter((c) => deps_hasLabel(c, labelId));
-  if (priority) cards = cards.filter((c) => c.priority === priority);
-  if (due === 'overdue') cards = cards.filter((c) => c.due && !c.due_complete && new Date(c.due) < new Date());
-  if (due === 'week') {
-    const limit = new Date(Date.now() + 7 * 86400000);
-    cards = cards.filter((c) => c.due && !c.due_complete && new Date(c.due) <= limit);
-  }
-  cards.sort((a, b) => a.position - b.position);
-  return cards;
+  return cardsByList().get(listId) || EMPTY_CARDS;
 }
 
 function deps_hasLabel(card, labelId) {

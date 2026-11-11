@@ -121,7 +121,7 @@ impl Service {
     pub fn list_attachments(&self, card_id: &str) -> Result<Vec<Attachment>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM attachments WHERE card_id=?1 ORDER BY created_at")?;
+            db.conn.prepare_cached("SELECT * FROM attachments WHERE card_id=?1 ORDER BY created_at")?;
         let atts = stmt
             .query_map([card_id], row_attachment)?
             .collect::<rusqlite::Result<_>>()?;

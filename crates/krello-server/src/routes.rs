@@ -106,10 +106,23 @@ fn ok_json(v: Value) -> Response {
     (StatusCode::OK, Json(v)).into_response()
 }
 
+/// Run a blocking SQLite/AI workload on the blocking thread pool instead of
+/// monopolizing an async worker for hundreds of ms.
+async fn blocking<T, F>(f: F) -> ApiResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> krello_core::error::Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| ApiError(krello_core::Error::Validation(format!("tâche interne interrompue: {e}"))))?
+        .map_err(ApiError)
+}
+
 // ---------- health / undo ----------
 
 async fn health(State(state): State<SharedState>) -> ApiResult<Response> {
-    let boards = state.service.list_boards(false)?.len();
+    let boards = state.service.count_boards()?;
     Ok(ok_json(json!({
         "ok": true,
         "name": "krello",
@@ -185,7 +198,8 @@ async fn delete_all_boards(State(state): State<SharedState>) -> ApiResult<Respon
 }
 
 async fn duplicate_board(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
-    let board = state.service.duplicate_board(&id)?;
+    let service = state.service.clone();
+    let board = blocking(move || service.duplicate_board(&id)).await?;
     Ok((StatusCode::CREATED, Json(board)).into_response())
 }
 
@@ -710,10 +724,11 @@ async fn export_board(
     Query(q): Query<ExportQuery>,
 ) -> ApiResult<Response> {
     let format = krello_core::exim::ExportFormat::parse(q.format.as_deref().unwrap_or("json"))?;
-    let (filename, mime, body) = state
-        .service
-        .with_db(|conn| krello_core::exim::export_board(conn, &id, format))
-        .map_err(ApiError)?;
+    let service = state.service.clone();
+    let (filename, mime, body) = blocking(move || {
+        service.with_db(|conn| krello_core::exim::export_board(conn, &id, format))
+    })
+    .await?;
     Ok((
         [
             ("Content-Type", mime),
@@ -725,12 +740,14 @@ async fn export_board(
 }
 
 async fn import_trello_route(State(state): State<SharedState>, body: String) -> ApiResult<Response> {
-    let board = krello_core::exim::import_trello(&state.service, &body).map_err(ApiError)?;
+    let service = state.service.clone();
+    let board = blocking(move || krello_core::exim::import_trello(&service, &body)).await?;
     Ok((StatusCode::CREATED, Json(board)).into_response())
 }
 
 async fn import_krello_route(State(state): State<SharedState>, body: String) -> ApiResult<Response> {
-    let board = krello_core::exim::import_krello(&state.service, &body).map_err(ApiError)?;
+    let service = state.service.clone();
+    let board = blocking(move || krello_core::exim::import_krello(&service, &body)).await?;
     Ok((StatusCode::CREATED, Json(board)).into_response())
 }
 
@@ -805,40 +822,41 @@ struct PlanBody {
 }
 
 async fn ai_plan(State(state): State<SharedState>, Json(body): Json<PlanBody>) -> ApiResult<Response> {
-    let plan = ai::plan_project(state.ai.as_ref(), &body.goal).map_err(ApiError)?;
-    if !body.apply {
-        return Ok(ok_json(json!({ "plan": plan })));
-    }
-    // create cards then FS dependencies following depends_on titles
-    let board = state.service.get_board(&body.board_id).map_err(ApiError)?;
-    let mut created = Vec::new();
-    let mut title_to_id: std::collections::HashMap<String, String> = Default::default();
-    for t in &plan {
-        let mut c = ai::parsed_task_to_create_card(
-            &ai::ParsedTask {
-                title: t.title.clone(),
-                description: String::new(),
-                start: None,
-                due: None,
-                priority: None,
-                labels: Vec::new(),
-                checklist: Vec::new(),
-            },
-            &body.list_id,
-        );
-        c.duration_days = Some(t.duration_days.max(0.0));
-        c.is_milestone = Some(t.milestone);
-        let card = state.service.create_card(&board.id, c)?;
-        title_to_id.insert(t.title.clone(), card.id.clone());
-        created.push(card);
-    }
-    let mut deps = Vec::new();
-    for t in &plan {
-        for pred_title in &t.depends_on {
-            if let (Some(pred), Some(succ)) = (title_to_id.get(pred_title), title_to_id.get(&t.title)) {
-                let dep = state
-                    .service
-                    .add_dependency(
+    let ai = state.ai.clone();
+    let service = state.service.clone();
+    let (plan, created, deps, summary) = blocking(move || {
+        let plan = ai::plan_project(ai.as_ref(), &body.goal)?;
+        if !body.apply {
+            return Ok((plan, Vec::new(), Vec::new(), None));
+        }
+        // create cards then FS dependencies following depends_on titles
+        let board = service.get_board(&body.board_id)?;
+        let mut created = Vec::new();
+        let mut title_to_id: std::collections::HashMap<String, String> = Default::default();
+        for t in &plan {
+            let mut c = ai::parsed_task_to_create_card(
+                &ai::ParsedTask {
+                    title: t.title.clone(),
+                    description: String::new(),
+                    start: None,
+                    due: None,
+                    priority: None,
+                    labels: Vec::new(),
+                    checklist: Vec::new(),
+                },
+                &body.list_id,
+            );
+            c.duration_days = Some(t.duration_days.max(0.0));
+            c.is_milestone = Some(t.milestone);
+            let card = service.create_card(&board.id, c)?;
+            title_to_id.insert(t.title.clone(), card.id.clone());
+            created.push(card);
+        }
+        let mut deps = Vec::new();
+        for t in &plan {
+            for pred_title in &t.depends_on {
+                if let (Some(pred), Some(succ)) = (title_to_id.get(pred_title), title_to_id.get(&t.title)) {
+                    let dep = service.add_dependency(
                         &board.id,
                         CreateDependency {
                             predecessor_id: pred.clone(),
@@ -846,13 +864,18 @@ async fn ai_plan(State(state): State<SharedState>, Json(body): Json<PlanBody>) -
                             kind: "FS".into(),
                             lag_days: None,
                         },
-                    )
-                    .map_err(ApiError)?;
-                deps.push(dep);
+                    )?;
+                    deps.push(dep);
+                }
             }
         }
+        let summary = service.recompute_and_notify_public(&board.id)?;
+        Ok((plan, created, deps, Some(summary)))
+    })
+    .await?;
+    if !body.apply {
+        return Ok(ok_json(json!({ "plan": plan })));
     }
-    let summary = state.service.recompute_and_notify_public(&board.id).map_err(ApiError)?;
     Ok((StatusCode::CREATED, Json(json!({ "plan": plan, "cards": created, "dependencies": deps, "schedule": summary }))).into_response())
 }
 
@@ -968,7 +991,8 @@ async fn run_backup_now(State(state): State<SharedState>) -> ApiResult<Response>
 // ---------- list duplicate ----------
 
 async fn duplicate_list_route(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
-    let list = state.service.duplicate_list(&id)?;
+    let service = state.service.clone();
+    let list = blocking(move || service.duplicate_list(&id)).await?;
     Ok((StatusCode::CREATED, Json(list)).into_response())
 }
 

@@ -91,7 +91,7 @@ impl Service {
     pub fn list_labels(&self, board_id: &str) -> Result<Vec<Label>> {
         let db = self.lock_db()?;
         let mut stmt =
-            db.conn.prepare("SELECT * FROM labels WHERE board_id=?1 ORDER BY created_at")?;
+            db.conn.prepare_cached("SELECT * FROM labels WHERE board_id=?1 ORDER BY created_at")?;
         let labels = stmt
             .query_map([board_id], row_label)?
             .collect::<rusqlite::Result<_>>()?;

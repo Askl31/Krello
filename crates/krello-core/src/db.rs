@@ -95,6 +95,20 @@ impl Db {
                 [],
             )?;
         }
+        if version < 6 {
+            self.conn.execute_batch(include_str!("../migrations/006_perf_indexes.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '6')",
+                [],
+            )?;
+        }
+        if version < 7 {
+            self.conn.execute_batch(include_str!("../migrations/007_fts_trigger_when.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '7')",
+                [],
+            )?;
+        }
 
         // Ensure the default calendar exists.
         self.conn.execute(
@@ -107,8 +121,7 @@ impl Db {
 
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
         let mut stmt = self
-            .conn
-            .prepare("SELECT value FROM meta WHERE key = ?1")?;
+            .conn.prepare_cached("SELECT value FROM meta WHERE key = ?1")?;
         let mut rows = stmt.query([key])?;
         match rows.next()? {
             Some(row) => Ok(Some(row.get(0)?)),
