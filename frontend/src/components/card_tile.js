@@ -15,6 +15,9 @@ export function cardTileHtml(card) {
   const milestone = card.is_milestone
     ? `<span class="badge" style="color:var(--warning);background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning)35%,transparent)">${icon('milestone', { size: 10 })} jalon</span>`
     : '';
+  const templateBadge = card.is_template
+    ? `<span class="badge" style="color:var(--accent);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent)35%,transparent)">${icon('template', { size: 10 })} modèle</span>`
+    : '';
   const duration = card.duration_days
     ? `<span class="mini" title="Durée estimée : ${card.duration_days} jours ouvrés">${icon('clock', { size: 11 })} ${card.duration_days}j</span>`
     : '';
@@ -32,6 +35,7 @@ export function cardTileHtml(card) {
         ${dueBadge(card)}
         ${priorityBadge(card)}
         ${milestone}
+        ${templateBadge}
         ${duration}
         ${pct !== null ? `<span class="badge" style="color:var(--success);background:var(--success-soft);border-color:color-mix(in srgb,var(--success)35%,transparent)">${icon('check', { size: 11 })} ${pct}%</span>` : ''}
         ${counts}

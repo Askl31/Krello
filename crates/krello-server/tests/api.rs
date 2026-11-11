@@ -163,6 +163,93 @@ async fn ai_status_endpoint_shape() {
 }
 
 #[tokio::test]
+async fn card_templates_flow() {
+    let app = test_krello_app();
+    let (_, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({"title": "Templates"}))).await;
+    let board_id = board["id"].as_str().unwrap().to_string();
+    let (_, list) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({"title": "L"}))).await;
+    let list_id = list["id"].as_str().unwrap().to_string();
+
+    // carte source avec échéance + description
+    let (_, card) = json_req(
+        &app,
+        "POST",
+        &format!("/api/v1/boards/{board_id}/cards"),
+        Some(serde_json::json!({"title": "Modele X", "list_id": list_id, "due": "2026-12-01", "description": "contenu"})),
+    )
+    .await;
+    let card_id = card["id"].as_str().unwrap().to_string();
+
+    // conversion en modèle
+    let (status, tpl) = json_req(
+        &app,
+        "PATCH",
+        &format!("/api/v1/cards/{card_id}/template"),
+        Some(serde_json::json!({"is_template": true, "template_description": "aide galerie"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tpl["is_template"], true);
+    assert_eq!(tpl["template_description"], "aide galerie");
+
+    // galerie du board
+    let (status, tpls) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/templates"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tpls.as_array().unwrap().len(), 1);
+
+    // instanciation : titre par défaut, dates jamais copiées
+    let (status, inst) = json_req(
+        &app,
+        "POST",
+        &format!("/api/v1/cards/{card_id}/instantiate"),
+        Some(serde_json::json!({"list_id": list_id, "at": "bottom"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(inst["title"], "Modele X");
+    assert_eq!(inst["description"], "contenu");
+    assert_eq!(inst["due"], serde_json::Value::Null);
+    assert_eq!(inst["is_template"], false);
+
+    // les modèles sont exclus de la recherche : seule l'instance sort
+    let (status, hits) = json_req(&app, "GET", &format!("/api/v1/search?q=Modele&board_id={board_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let arr = hits.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["is_template"], false);
+
+    // instancier une carte non-modèle → 400
+    let (_, plain) = json_req(
+        &app,
+        "POST",
+        &format!("/api/v1/boards/{board_id}/cards"),
+        Some(serde_json::json!({"title": "Ordinaire", "list_id": list_id})),
+    )
+    .await;
+    let (status, _) = json_req(
+        &app,
+        "POST",
+        &format!("/api/v1/cards/{}/instantiate", plain["id"].as_str().unwrap()),
+        Some(serde_json::json!({"list_id": list_id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // reconversion en carte ordinaire
+    let (status, back) = json_req(
+        &app,
+        "PATCH",
+        &format!("/api/v1/cards/{card_id}/template"),
+        Some(serde_json::json!({"is_template": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(back["template_description"], serde_json::Value::Null);
+    let (_, tpls) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/templates"), None).await;
+    assert_eq!(tpls.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn trello_import_endpoint() {
     let app = test_krello_app();
     let fixture = serde_json::json!({

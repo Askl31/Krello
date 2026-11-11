@@ -246,7 +246,7 @@ impl Service {
                                     .and_then(|d| parse_date(d).or_else(|| crate::time::parse_dt(d).map(|t| t.date())))
                                     .map(|d| {
                                         let delta = crate::time::days_between(today(), d);
-                                        delta >= 0 && delta <= days && !c.due_complete
+                                        delta >= 0 && delta <= days && !c.due_complete && !c.is_template
                                     })
                                     .unwrap_or(false)
                             })
@@ -305,7 +305,7 @@ fn select_targets(service: &Service, auto: &Automation) -> Result<Vec<String>> {
     let label_id = conds.get("label_id").and_then(|v| v.as_str());
     let db = service.lock_db()?;
     let mut stmt = db.conn.prepare(
-        "SELECT id FROM cards WHERE board_id=?1 AND archived=0
+        "SELECT id FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0
          AND (?2 IS NULL OR list_id=?2)
          AND (?3 IS NULL OR id IN (SELECT card_id FROM card_labels WHERE label_id=?3))",
     )?;

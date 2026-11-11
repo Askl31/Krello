@@ -36,6 +36,9 @@ Toutes les réponses sont en JSON (sauf exports). Erreurs :
 | `DELETE /cards/{id}` | suppression (undoable) |
 | `POST /cards/{id}/move` | `{list_id?, position? \| before? \| after?}` (cross-board ok) |
 | `POST /cards/{id}/duplicate` | copie + enfants |
+| `PATCH /cards/{id}/template` | `{is_template, template_description?}` — bascule carte ↔ modèle (badge, aide galerie) |
+| `POST /cards/{id}/instantiate` | `{list_id, name?, keep?, at?: "top"\|"bottom", position?}` — instancie une carte depuis un modèle ; copie profonde en une transaction : titre + description toujours, puis selon `keep` (défaut tout) : `checklists` (items décochés, ids neufs), `labels`, `attachments` (octets dupliqués), `customFields`, `cover` ; jamais copiés : dates, `due_complete`/`pct_complete`, commentaires, activité. 404 si modèle/liste introuvable, 400 si non-modèle ou liste hors board |
+| `GET /boards/{id}/templates` | galerie : cartes `is_template=1` non archivées (ordre = position dans leur liste) |
 | `PUT /cards/{id}/labels` | `[label_id…]` (remplace) |
 | `POST/DELETE /cards/{id}/labels/{label_id}` | attache/détache |
 | `POST /cards/{id}/cover` | `{color: "#hex" \| null}` |

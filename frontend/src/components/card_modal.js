@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { escapeHtml, mdToHtml, fmtDateTime, fmtDate, parseDate, toISODate, PRIORITY_META, LABEL_COLORS } from '../format.js';
 import { openModal, toast, confirmDialog, promptDialog } from '../ui/modal.js';
-import { state } from '../state.js';
+import { state, visibleLists } from '../state.js';
 import { on } from '../ws.js';
 import { icon } from '../icons.js';
 
@@ -110,7 +110,25 @@ export async function openCardModal(cardId, { onChange } = {}) {
 
           <div class="side">
             <div class="modal-section">
+              <div class="label">Modèle</div>
+              ${card.is_template ? `
+                <div class="field">
+                  <label>Aide dans la galerie</label>
+                  <textarea class="input" id="cm-template-desc" rows="2" style="resize:vertical" placeholder="Texte d'aide affiché sous le modèle…">${escapeHtml(card.template_description || '')}</textarea>
+                </div>
+                <button class="btn primary sm" id="cm-from-template" style="width:100%;justify-content:center;margin-top:8px">${icon('plus', { size: 13 })} <span>Créer une carte depuis ce modèle</span></button>
+                <button class="btn ghost sm" id="cm-untoggle-template" style="margin-top:6px">Reconvertir en carte ordinaire</button>
+              ` : `
+                <button class="btn ghost sm" id="cm-make-template">${icon('template', { size: 13 })} <span>En faire un modèle</span></button>
+                <div class="muted" style="font-size:11.5px;margin-top:6px">Un modèle sert de source : créez de nouvelles cartes en un clic depuis n'importe quelle liste.</div>
+              `}
+            </div>
+
+            <div class="modal-section">
               <div class="label">Planification & Délais</div>
+              ${card.is_template
+                ? `<div class="muted" style="font-size:12px">${icon('alert', { size: 12 })} Dates et statut « terminée » masqués sur un modèle — jamais copiés vers les nouvelles cartes.</div>`
+                : `
               <div class="field">
                 <label>Échéance</label>
                 <input type="date" class="input" id="cm-due" value="${dateOnly(card.due)}" />
@@ -129,6 +147,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
                 <label>Date de début</label>
                 <input type="date" class="input" id="cm-start" value="${dateOnly(card.start)}" />
               </div>
+              `}
               <div class="field">
                 <label>Priorité</label>
                 <select class="input" id="cm-priority">
@@ -351,16 +370,16 @@ export async function openCardModal(cardId, { onChange } = {}) {
     };
     // --- attributs
     const upd = (patch) => api.updateCard(card.id, patch).then((c) => { detail.card = c; notify(); }).catch((e) => toast(e.message, 'err'));
-    el.querySelector('#cm-due').onchange = (e) => {
-      const time = el.querySelector('#cm-due-time').value;
+    el.querySelector('#cm-due')?.addEventListener('change', (e) => {
+      const time = el.querySelector('#cm-due-time')?.value;
       upd({ due: e.target.value ? (e.target.value + (time ? `T${time}:00` : '')) : null });
-    };
-    el.querySelector('#cm-due-time').onchange = (e) => {
-      const d = el.querySelector('#cm-due').value;
+    });
+    el.querySelector('#cm-due-time')?.addEventListener('change', (e) => {
+      const d = el.querySelector('#cm-due')?.value;
       if (d) upd({ due: d + (e.target.value ? `T${e.target.value}:00` : '') });
-    };
-    el.querySelector('#cm-due-complete').onchange = (e) => upd({ due_complete: e.target.checked });
-    el.querySelector('#cm-start').onchange = (e) => upd({ start: e.target.value || null });
+    });
+    el.querySelector('#cm-due-complete')?.addEventListener('change', (e) => upd({ due_complete: e.target.checked }));
+    el.querySelector('#cm-start')?.addEventListener('change', (e) => upd({ start: e.target.value || null }));
     el.querySelector('#cm-priority').onchange = (e) => upd({ priority: e.target.value });
     el.querySelector('#cm-duration').onchange = (e) => upd({ duration_days: e.target.value === '' ? null : Number(e.target.value) });
     el.querySelector('#cm-work').onchange = (e) => upd({ work_hours: e.target.value === '' ? null : Number(e.target.value) });
@@ -484,6 +503,62 @@ export async function openCardModal(cardId, { onChange } = {}) {
         close(); notify();
       }
     };
+    // --- modèle
+    el.querySelector('#cm-make-template')?.addEventListener('click', async () => {
+      if ((card.start || card.due) && !(await confirmDialog('Cette carte contient des dates : elles resteront sur le modèle mais ne seront jamais copiées vers les nouvelles cartes. Continuer ?'))) return;
+      try {
+        detail.card = await api.setCardTemplate(card.id, { is_template: true });
+        refreshData();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+    el.querySelector('#cm-untoggle-template')?.addEventListener('click', async () => {
+      try {
+        detail.card = await api.setCardTemplate(card.id, { is_template: false });
+        refreshData();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+    el.querySelector('#cm-template-desc')?.addEventListener('change', async (e) => {
+      try {
+        detail.card = await api.setCardTemplate(card.id, { is_template: true, template_description: e.target.value });
+        notify();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+    el.querySelector('#cm-from-template')?.addEventListener('click', () => {
+      const fm = openModal(`
+        <div class="modal-head">
+          <h2>Créer une carte depuis ce modèle</h2>
+          <button class="iconbtn" data-close title="Fermer">${icon('close', { size: 16 })}</button>
+        </div>
+        <div class="modal-body">
+          <div class="field"><label>Liste de destination</label>
+            <select class="input" id="ft-list">${visibleLists().map((l) => `<option value="${l.id}" ${l.id === card.list_id ? 'selected' : ''}>${escapeHtml(l.title)}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="margin-top:8px"><label>Titre de la carte</label>
+            <input class="input" id="ft-title" value="${escapeHtml(card.title)}" />
+          </div>
+          <div class="row" style="justify-content:flex-end;margin-top:14px">
+            <button class="btn primary" id="ft-create">${icon('plus', { size: 14 })} <span>Créer la carte</span></button>
+          </div>
+        </div>`, { id: 'from-template-modal' });
+      const titleInput = fm.el.querySelector('#ft-title');
+      titleInput.focus();
+      titleInput.select();
+      const create = async () => {
+        try {
+          const nc = await api.instantiateTemplate(card.id, {
+            list_id: fm.el.querySelector('#ft-list').value,
+            name: titleInput.value || undefined,
+            at: 'bottom',
+          });
+          fm.close();
+          close();
+          notify();
+          openCardModal(nc.id, { onChange });
+        } catch (err) { toast(err.message, 'err'); }
+      };
+      fm.el.querySelector('#ft-create').onclick = create;
+      titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
+    });
     // --- IA
     el.querySelector('#cm-ai')?.addEventListener('click', () => {
       const menu = openModal(`

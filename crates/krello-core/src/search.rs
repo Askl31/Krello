@@ -43,7 +43,7 @@ pub fn search_cards(
     if fts.is_some() {
         sql.push_str(" JOIN cards_fts f ON f.rowid = c.rowid");
     }
-    sql.push_str(" WHERE 1=1");
+    sql.push_str(" WHERE 1=1 AND c.is_template = 0");
     let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(expr) = &fts {
         args.push(Box::new(expr.clone()));
@@ -115,7 +115,7 @@ pub fn search_global(conn: &rusqlite::Connection, q: &str, limit: i64) -> Result
 pub fn suggest_cards(conn: &rusqlite::Connection, q: &str, limit: i64) -> Result<Vec<Card>> {
     let like = format!("%{}%", q.replace('%', "").to_lowercase());
     let mut stmt = conn.prepare(
-        "SELECT * FROM cards WHERE archived=0 AND LOWER(title) LIKE ?1
+        "SELECT * FROM cards WHERE archived=0 AND is_template=0 AND LOWER(title) LIKE ?1
          ORDER BY updated_at DESC LIMIT ?2",
     )?;
     let cards = stmt

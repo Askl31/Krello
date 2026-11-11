@@ -93,7 +93,7 @@ export function renderSidebar(host) {
   const boardList = host.querySelector('#sb-boards');
   boardList.innerHTML = state.boards.map((b) => {
     const active = state.board?.id === b.id;
-    const count = b.id === state.board?.id ? state.cards.filter((c) => !c.archived).length : null;
+    const count = b.id === state.board?.id ? state.cards.filter((c) => !c.archived && !c.is_template).length : null;
     const color = /^#/.test(b.background?.match(/"value":"(#[0-9a-fA-F]+)"/)?.[1] || '')
       ? b.background.match(/"value":"(#[0-9a-fA-F]+)"/)[1] : 'var(--accent)';
     return `

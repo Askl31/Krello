@@ -21,7 +21,7 @@ export function renderTimeline() {
   // ensemble de cartes avec dates
   const rows = [];
   for (const list of visibleLists()) {
-    for (const card of state.cards.filter((c) => c.list_id === list.id && !c.archived)
+    for (const card of state.cards.filter((c) => c.list_id === list.id && !c.archived && !c.is_template)
       .sort((a, b) => a.position - b.position)) {
       const dates = effectiveDates(card);
       if (dates.start || dates.end) rows.push({ card, dates });

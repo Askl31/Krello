@@ -64,7 +64,7 @@ function renderFilters() {
   const bar = host.querySelector('#board-filters');
   const f = state.filters;
   const visible = visibleLists().reduce((s, l) => s + cardsOfList(l.id).length, 0);
-  const total = state.cards.filter((c) => !c.archived).length;
+  const total = state.cards.filter((c) => !c.archived && !c.is_template).length;
   const hasFilters = f.text || f.labelId || f.priority || f.due || f.includeArchived;
   bar.innerHTML = `
     <span class="flabel">${icon('filter', { size: 13 })} <span>Filtres</span></span>
@@ -148,7 +148,7 @@ function updateFilterBar() {
   if (!bar) return;
   const f = state.filters;
   const visible = visibleLists().reduce((s, l) => s + cardsOfList(l.id).length, 0);
-  const total = state.cards.filter((c) => !c.archived).length;
+  const total = state.cards.filter((c) => !c.archived && !c.is_template).length;
   const count = bar.querySelector('.fcount');
   if (count) count.textContent = `${visible}/${total} cartes`;
   const hasFilters = !!(f.text || f.labelId || f.priority || f.due || f.includeArchived);
@@ -192,10 +192,15 @@ function listEl(list) {
     <div class="list-body" data-body="${list.id}">
       ${cards.map(cardTileHtml).join('')}
     </div>
-    <button class="add-card" data-add-card="${list.id}">
-      ${icon('plus', { size: 13 })}
-      <span>Ajouter une carte</span>
-    </button>
+    <div class="list-foot">
+      <button class="add-card" data-add-card="${list.id}">
+        ${icon('plus', { size: 13 })}
+        <span>Ajouter une carte</span>
+      </button>
+      <button class="iconbtn" data-add-from-template="${list.id}" title="Créer depuis un modèle">
+        ${icon('template', { size: 14 })}
+      </button>
+    </div>
   `;
 
   // interactions cartes
@@ -210,6 +215,9 @@ function listEl(list) {
 
   // quick add
   el.querySelector('[data-add-card]').onclick = () => quickAdd(list.id, el.querySelector('.list-body'));
+
+  // galerie de modèles
+  el.querySelector('[data-add-from-template]')?.addEventListener('click', () => openTemplateGallery(list.id));
 
   // édition titre + menu
   el.querySelector('[data-edit-list]').addEventListener('click', async () => {
@@ -323,6 +331,48 @@ async function quickAdd(listId, body) {
   textarea.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
     if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+}
+
+/** Galerie des modèles du board : instancie une carte dans la liste donnée. */
+function openTemplateGallery(listId) {
+  const templates = state.cards
+    .filter((c) => c.is_template && !c.archived)
+    .sort((a, b) => a.position - b.position);
+  const rows = templates.map((t) => {
+    const desc = t.template_description || t.description || '';
+    const counts = [
+      t._checklists?.length ? `${t._checklists.length} checklist${t._checklists.length > 1 ? 's' : ''}` : '',
+      t._label_ids?.length ? `${t._label_ids.length} label${t._label_ids.length > 1 ? 's' : ''}` : '',
+      t._attachments_count ? `${t._attachments_count} pièce${t._attachments_count > 1 ? 's' : ''} jointe${t._attachments_count > 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <button class="tpl-row" data-tpl="${t.id}">
+        <b>${escapeHtml(t.title)}</b>
+        ${desc ? `<span class="muted" style="font-size:12px">${escapeHtml(desc.length > 110 ? `${desc.slice(0, 110)}…` : desc)}</span>` : ''}
+        ${counts ? `<span class="mini muted">${counts}</span>` : ''}
+      </button>`;
+  }).join('');
+  const m = openModal(`
+    <div class="modal-head">
+      <h2>Créer depuis un modèle</h2>
+      <button class="iconbtn" data-close title="Fermer">${icon('close', { size: 16 })}</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
+      ${rows || '<div class="muted" style="padding:8px 2px">Aucun modèle sur ce board. Ouvrez une carte puis « En faire un modèle ».</div>'}
+    </div>`, { id: 'template-gallery' });
+  m.el.querySelector('.modal-body').addEventListener('click', async (e) => {
+    const id = e.target.closest('[data-tpl]')?.dataset.tpl;
+    if (!id) return;
+    const tpl = state.cards.find((c) => c.id === id);
+    m.close();
+    const title = await promptDialog('Titre de la nouvelle carte', tpl?.title || '');
+    if (!title) return;
+    try {
+      const nc = await api.instantiateTemplate(id, { list_id: listId, name: title, at: 'bottom' });
+      await reload();
+      openCardModal(nc.id, { onChange: reload });
+    } catch (err) { toast(err.message, 'err'); }
   });
 }
 

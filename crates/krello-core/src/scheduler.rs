@@ -164,7 +164,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
     let cal = calendar_for(conn, board.calendar_id.as_deref())?;
     let mut cards: Vec<Card> = {
         let mut stmt =
-            conn.prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0")?;
+            conn.prepare("SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0")?;
         let v = stmt
             .query_map([board_id], row_card)?
             .collect::<rusqlite::Result<_>>()?;

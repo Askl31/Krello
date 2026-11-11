@@ -8,7 +8,7 @@ import { icon } from '../icons.js';
 
 export function renderDashboard() {
   const host = document.querySelector('.view');
-  const cards = state.cards.filter((c) => !c.archived);
+  const cards = state.cards.filter((c) => !c.archived && !c.is_template);
   const lists = visibleLists();
   const today = new Date();
 

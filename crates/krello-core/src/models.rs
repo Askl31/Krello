@@ -49,6 +49,13 @@ pub struct Card {
     pub position: f64,
     #[serde(default)]
     pub archived: bool,
+    /// Template flag: template cards are hidden from work views/search/counters
+    /// and serve as deep-copy sources for instantiation.
+    #[serde(default)]
+    pub is_template: bool,
+    /// Optional helper text shown in the template gallery.
+    #[serde(default)]
+    pub template_description: Option<String>,
     /// JSON cover: {"type":"color","value":"#hex"} | {"type":"attachment","value":id} | null
     pub cover: Option<String>,
     pub start: Option<String>,
@@ -341,6 +348,52 @@ pub struct UpdateCard {
     pub constraint_date: Option<String>,
     pub cost: Option<f64>,
     pub archived: Option<bool>,
+}
+
+/// Sections of a template copied when instantiating a card
+/// (mirrors Trello's `keepFromSource`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CopySection {
+    Checklists,
+    Labels,
+    Attachments,
+    CustomFields,
+    Cover,
+}
+
+impl CopySection {
+    pub const ALL: [CopySection; 5] = [
+        CopySection::Checklists,
+        CopySection::Labels,
+        CopySection::Attachments,
+        CopySection::CustomFields,
+        CopySection::Cover,
+    ];
+}
+
+/// Toggle the template flag on a card (Trello "Make template").
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct SetTemplate {
+    pub is_template: bool,
+    pub template_description: Option<String>,
+}
+
+/// Instantiate a new card from a template: deep copy in one transaction.
+/// Title and description are always copied; dates, completion status,
+/// comments and activity never are.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct InstantiateTemplate {
+    pub list_id: String,
+    pub name: Option<String>,
+    /// Sections to copy; None = all copyable sections.
+    pub keep: Option<Vec<CopySection>>,
+    /// "top" (default) | "bottom".
+    pub at: Option<String>,
+    /// Explicit floating position (wins over `at`).
+    pub position: Option<f64>,
 }
 
 /// Move a card within its list or to another list.

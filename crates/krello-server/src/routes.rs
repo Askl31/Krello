@@ -27,6 +27,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/activity", get(board_activity))
         .route("/boards/{id}/lists", get(list_lists).post(create_list))
         .route("/boards/{id}/cards", get(list_cards).post(create_card))
+        .route("/boards/{id}/templates", get(list_board_templates))
         .route("/boards/{id}/labels", get(list_labels).post(create_label))
         .route("/boards/{id}/fields", get(list_fields).post(create_field))
         .route("/boards/{id}/dependencies", get(list_deps).post(add_dep))
@@ -43,6 +44,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/cards/{id}", get(get_card).patch(update_card).delete(delete_card))
         .route("/cards/{id}/move", post(move_card))
         .route("/cards/{id}/duplicate", post(duplicate_card))
+        .route("/cards/{id}/template", patch(set_card_template))
+        .route("/cards/{id}/instantiate", post(instantiate_card))
         .route("/cards/{id}/labels", put(set_card_labels))
         .route("/cards/{id}/labels/{label_id}", post(attach_label).delete(detach_label))
         .route("/cards/{id}/cover", post(set_cover_color))
@@ -263,6 +266,29 @@ async fn move_card(State(state): State<SharedState>, Path(id): Path<String>, Jso
 async fn duplicate_card(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     let card = state.service.duplicate_card(&id)?;
     Ok((StatusCode::CREATED, Json(card)).into_response())
+}
+
+async fn set_card_template(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Json(s): Json<SetTemplate>,
+) -> ApiResult<Response> {
+    let card = state.service.set_template(&id, s)?;
+    Ok(Json(card).into_response())
+}
+
+async fn instantiate_card(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Json(r): Json<InstantiateTemplate>,
+) -> ApiResult<Response> {
+    let card = state.service.instantiate_from_template(&id, r)?;
+    Ok((StatusCode::CREATED, Json(card)).into_response())
+}
+
+async fn list_board_templates(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
+    let cards = state.service.list_templates(&id)?;
+    Ok(Json(cards).into_response())
 }
 
 async fn set_card_labels(State(state): State<SharedState>, Path(id): Path<String>, Json(body): Json<Vec<String>>) -> ApiResult<Response> {

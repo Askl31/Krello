@@ -48,7 +48,8 @@ impl Service {
             )?;
             db.conn.execute(
                 "INSERT INTO baseline_snapshots(baseline_id, card_id, start, due, duration_days, work_hours)
-                 SELECT ?2, id, start, due, duration_days, work_hours FROM cards WHERE board_id=?1 AND archived=0",
+                 SELECT ?2, id, start, due, duration_days, work_hours FROM cards
+                 WHERE board_id=?1 AND archived=0 AND is_template=0",
                 params![board_id, baseline.id],
             )?;
         }
@@ -149,11 +150,11 @@ impl Service {
         Ok(out)
     }
 
-    /// Convenience: current cards of a board (used by export/dashboard).
+    /// Convenience: current cards of a board, sans modèles (export/dashboard).
     pub fn cards_for_dashboard(&self, board_id: &str) -> Result<Vec<Card>> {
         let db = self.lock_db()?;
         let mut stmt = db.conn.prepare(
-            "SELECT * FROM cards WHERE board_id=?1 AND archived=0 ORDER BY due NULLS LAST",
+            "SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY due NULLS LAST",
         )?;
         let cards = stmt
             .query_map([board_id], row_card)?

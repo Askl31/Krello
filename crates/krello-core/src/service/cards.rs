@@ -1,6 +1,6 @@
 //! Card CRUD, floating-position moves (incl. cross-board), duplication, deletion.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, OptionalExtension};
 
@@ -27,6 +27,8 @@ impl Service {
             description: c.description,
             position: 0.0,
             archived: false,
+            is_template: false,
+            template_description: None,
             cover: c.cover,
             start: c.start,
             due: c.due,
@@ -503,6 +505,270 @@ impl Service {
         Ok(card)
     }
 
+    /// Toggle the template flag on a card (Trello "Make template").
+    pub fn set_template(&self, id: &str, s: SetTemplate) -> Result<Card> {
+        let db = self.lock_db()?;
+        let before =
+            query_card(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("card {id}")))?;
+        let mut after = before.clone();
+        after.is_template = s.is_template;
+        if let Some(v) = &s.template_description {
+            after.template_description =
+                if v.trim().is_empty() { None } else { Some(v.trim().to_string()) };
+        }
+        if !after.is_template {
+            after.template_description = None;
+        }
+        after.updated_at = now_updated();
+        update_card_row(&db.conn, &after)?;
+        let entry = UndoEntry {
+            label: if after.is_template {
+                format!("Conversion en modèle de « {} »", after.title)
+            } else {
+                format!("Reconversion en carte de « {} »", after.title)
+            },
+            actions: vec![UndoAction::CardUpdated {
+                before,
+                after: after.clone(),
+            }],
+        };
+        drop(db);
+        self.push_undo(entry);
+        self.emit(Event::CardUpdated {
+            board_id: after.board_id.clone(),
+            card_id: id.to_string(),
+        });
+        Ok(after)
+    }
+
+    /// All template cards of a board; gallery order = position in their list.
+    pub fn list_templates(&self, board_id: &str) -> Result<Vec<Card>> {
+        let db = self.lock_db()?;
+        let mut stmt = db.conn.prepare(
+            "SELECT * FROM cards WHERE board_id=?1 AND is_template=1 AND archived=0 ORDER BY position",
+        )?;
+        let v = stmt
+            .query_map([board_id], row_card)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }
+
+    /// Instantiate a card from a template: one-transaction deep copy.
+    /// Always copied: title (unless `name`), description.
+    /// Copied per `keep`: checklists (fresh ids, items all unchecked), labels,
+    /// attachments (bytes duplicated), custom field values, cover.
+    /// Never copied: dates, completion status/progress, comments, activity —
+    /// a new card always starts with a clean schedule and history.
+    pub fn instantiate_from_template(&self, id: &str, r: InstantiateTemplate) -> Result<Card> {
+        let keep: HashSet<CopySection> = r
+            .keep
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_else(|| CopySection::ALL.into_iter().collect());
+        let has = |s: CopySection| keep.contains(&s);
+
+        let db = self.lock_db()?;
+        // Revalidate the template at creation time (it may have been deleted
+        // while the instantiation dialog was open).
+        let template =
+            query_card(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("card {id}")))?;
+        if !template.is_template {
+            return Err(Error::Validation("cette carte n'est pas un modèle".into()));
+        }
+        let list = query_list(&db.conn, &r.list_id)?
+            .ok_or_else(|| Error::NotFound(format!("list {}", r.list_id)))?;
+        if list.board_id != template.board_id {
+            return Err(Error::Validation(
+                "la liste cible doit appartenir au board du modèle".into(),
+            ));
+        }
+
+        let mut card = template.clone();
+        card.id = new_id("card");
+        card.list_id = r.list_id.clone();
+        if let Some(name) = &r.name {
+            if !name.trim().is_empty() {
+                card.title = name.trim().to_string();
+            }
+        }
+        card.position = match r.position {
+            Some(p) => p,
+            None => match r.at.as_deref() {
+                Some("bottom") => next_card_position(&db.conn, &r.list_id)?,
+                _ => {
+                    let min: Option<f64> = db
+                        .conn
+                        .query_row(
+                            "SELECT MIN(position) FROM cards WHERE list_id=?1",
+                            [&r.list_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    min.map(|m| m - 1.0).unwrap_or(0.0)
+                }
+            },
+        };
+        // Reset everything temporal or social — never copied to instances.
+        card.archived = false;
+        card.is_template = false;
+        card.template_description = None;
+        card.start = None;
+        card.due = None;
+        card.due_complete = false;
+        card.completed_at = None;
+        card.reminder = None;
+        card.recurrence = None;
+        card.constraint_type = "asap".into();
+        card.constraint_date = None;
+        card.pct_complete = 0;
+        card.created_at = now_rfc3339();
+        card.updated_at = card.created_at.clone();
+        if !has(CopySection::Cover) {
+            card.cover = None;
+        }
+        validate_card(&card)?;
+        insert_card_row(&db.conn, &card)?;
+
+        if has(CopySection::Labels) {
+            for lid in label_ids_for_card(&db.conn, id)? {
+                db.conn.execute(
+                    "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+                    params![&card.id, lid],
+                )?;
+            }
+        }
+        if has(CopySection::Checklists) {
+            let mut stmt = db
+                .conn
+                .prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+            let cls: Vec<Checklist> = stmt
+                .query_map([id], row_checklist)?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for cl in cls {
+                let ncl = Checklist {
+                    id: new_id("cl"),
+                    card_id: card.id.clone(),
+                    ..cl
+                };
+                insert_checklist_row(&db.conn, &ncl)?;
+                let mut stmt = db.conn.prepare(
+                    "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
+                )?;
+                let items: Vec<ChecklistItem> = stmt
+                    .query_map([&cl.id], row_checklist_item)?
+                    .collect::<rusqlite::Result<_>>()?;
+                drop(stmt);
+                for it in items {
+                    // Items are recreated unchecked: progress belongs to each instance.
+                    insert_checklist_item_row(
+                        &db.conn,
+                        &ChecklistItem {
+                            id: new_id("cli"),
+                            checklist_id: ncl.id.clone(),
+                            checked: false,
+                            due: None,
+                            ..it
+                        },
+                    )?;
+                }
+            }
+        }
+        if has(CopySection::CustomFields) {
+            let mut stmt = db.conn.prepare(
+                "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1",
+            )?;
+            let fvs: Vec<CustomFieldValue> = stmt
+                .query_map([id], row_field_value)?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for fv in fvs {
+                db.conn.execute(
+                    "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+                    params![&card.id, fv.field_id, fv.value],
+                )?;
+            }
+        }
+        let mut att_map: std::collections::HashMap<String, String> = Default::default();
+        if has(CopySection::Attachments) || has(CopySection::Cover) {
+            std::fs::create_dir_all(&self.attachments_dir)?;
+            let mut stmt = db.conn.prepare("SELECT * FROM attachments WHERE card_id=?1")?;
+            let atts: Vec<Attachment> = stmt
+                .query_map([id], row_attachment)?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for att in atts {
+                let needed = has(CopySection::Attachments)
+                    || Some(&att.id) == cover_attachment_id(&template.cover).as_ref();
+                if !needed {
+                    continue;
+                }
+                let nid = new_id("att");
+                let ext = std::path::Path::new(&att.filename)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| format!(".{}", e.to_lowercase()))
+                    .unwrap_or_default();
+                let stored_name = format!("{nid}{ext}");
+                let src = self.attachments_dir.join(&att.stored_path);
+                let dst = self.attachments_dir.join(&stored_name);
+                if std::fs::copy(&src, &dst).is_err() {
+                    continue; // source file missing: skip this attachment
+                }
+                att_map.insert(att.id.clone(), nid.clone());
+                insert_attachment_row(
+                    &db.conn,
+                    &Attachment {
+                        id: nid,
+                        card_id: card.id.clone(),
+                        stored_path: stored_name,
+                        ..att
+                    },
+                )?;
+            }
+        }
+        // Remap an attachment cover to the copied file; drop it if the copy failed.
+        if has(CopySection::Cover) {
+            let mut new_cover = card.cover.clone();
+            if let Some(att_id) = cover_attachment_id(&card.cover) {
+                new_cover = att_map.get(&att_id).map(|new_att| {
+                    serde_json::json!({ "type": "attachment", "value": new_att }).to_string()
+                });
+            }
+            if new_cover != card.cover {
+                db.conn.execute(
+                    "UPDATE cards SET cover=?1 WHERE id=?2",
+                    params![new_cover, card.id],
+                )?;
+                card.cover = new_cover;
+            }
+        }
+        log_activity(
+            &db.conn,
+            &card.board_id,
+            Some(&card.id),
+            "card_created",
+            &serde_json::json!({ "title": card.title, "list_id": card.list_id, "template": id }),
+        )?;
+        drop(db);
+
+        self.push_undo(UndoEntry {
+            label: format!("Carte créée depuis le modèle « {} »", template.title),
+            actions: vec![UndoAction::CardCreated(card.clone())],
+        });
+        self.emit(Event::CardCreated {
+            board_id: card.board_id.clone(),
+            card_id: card.id.clone(),
+        });
+        self.run_automations(
+            &card.board_id,
+            "card_created",
+            &serde_json::json!({ "card_id": card.id, "list_id": card.list_id }),
+        );
+        self.recompute_and_notify(&card.board_id)?;
+        Ok(card)
+    }
+
     pub fn delete_card(&self, id: &str) -> Result<()> {
         let db = self.lock_db()?;
         let snap = snapshot_card(&db.conn, id)?;
@@ -764,6 +1030,15 @@ pub(crate) fn validate_field_value(kind: &str, options: &str, value: &str) -> Re
         other => return Err(Error::Validation(format!("type de champ inconnu: {other}"))),
     }
     Ok(())
+}
+
+/// Attachment id referenced by a cover JSON (`{"type":"attachment","value":id}`).
+fn cover_attachment_id(cover: &Option<String>) -> Option<String> {
+    let c: serde_json::Value = serde_json::from_str(cover.as_deref()?).ok()?;
+    if c.get("type")?.as_str()? != "attachment" {
+        return None;
+    }
+    c.get("value")?.as_str().map(|s| s.to_string())
 }
 
 /// Positions of all cards per list — useful for optimistic client moves.

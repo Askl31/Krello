@@ -151,7 +151,7 @@ impl Service {
     pub fn list_card_count(&self, list_id: &str) -> Result<i64> {
         let db = self.lock_db()?;
         let n: i64 = db.conn.query_row(
-            "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND archived=0",
+            "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND archived=0 AND is_template=0",
             [list_id],
             |r| r.get(0),
         )?;
@@ -172,7 +172,7 @@ impl Service {
             return Ok(false);
         };
         let n: i64 = db.conn.query_row(
-            "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND archived=0",
+            "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND archived=0 AND is_template=0",
             [list_id],
             |r| r.get(0),
         )?;

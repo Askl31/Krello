@@ -16,7 +16,7 @@ export function renderTable() {
   const listById = (id) => lists.find((l) => l.id === id);
   const labelNames = (c) => (c._label_ids || []).map((id) => state.labels.find((l) => l.id === id)?.name).filter(Boolean).join(', ');
 
-  let cards = state.cards.filter((c) => !c.archived);
+  let cards = state.cards.filter((c) => !c.archived && !c.is_template);
   const get = {
     wbs: (c) => c.wbs || '',
     title: (c) => c.title.toLowerCase(),

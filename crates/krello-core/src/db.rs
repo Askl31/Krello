@@ -67,6 +67,13 @@ impl Db {
                 [],
             )?;
         }
+        if version < 2 {
+            self.conn.execute_batch(include_str!("../migrations/002_templates.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '2')",
+                [],
+            )?;
+        }
 
         // Ensure the default calendar exists.
         self.conn.execute(

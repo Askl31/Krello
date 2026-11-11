@@ -684,6 +684,8 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                     description: desc,
                     position: pos,
                     archived: closed,
+                    is_template: c.get("isTemplate").and_then(|v| v.as_bool()).unwrap_or(false),
+                    template_description: None,
                     cover: None,
                     start,
                     due,

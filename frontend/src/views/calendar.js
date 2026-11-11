@@ -32,7 +32,7 @@ export function renderCalendar() {
   const monthName = cursor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 
   // cartes par jour (due)
-  const withDue = state.cards.filter((c) => c.due && !c.archived);
+  const withDue = state.cards.filter((c) => c.due && !c.archived && !c.is_template);
   const byDay = new Map();
   for (const c of withDue) {
     const iso = toISODate(parseDate(c.due));

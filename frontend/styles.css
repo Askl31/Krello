@@ -1086,6 +1086,47 @@ textarea.input {
   color: var(--fg);
 }
 
+/* Pied de liste : ajout de carte + galerie de modèles */
+.list-foot {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin: 2px 6px 10px;
+}
+.list-foot .add-card {
+  flex: 1;
+  margin: 0;
+}
+.list-foot .iconbtn {
+  flex: none;
+  align-self: center;
+}
+
+/* Galerie de modèles */
+.tpl-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  text-align: left;
+  font-size: 13px;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.tpl-row:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+.tpl-row b {
+  font-weight: 600;
+}
+.tpl-row .mini {
+  font-size: 11px;
+}
+
 /* Bouton ajouter liste */
 .list-add {
   width: 292px;

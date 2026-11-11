@@ -228,6 +228,8 @@ pub fn row_card(r: &rusqlite::Row<'_>) -> rusqlite::Result<Card> {
         description: r.get("description")?,
         position: r.get("position")?,
         archived: r.get::<_, i64>("archived")? != 0,
+        is_template: r.get::<_, i64>("is_template")? != 0,
+        template_description: r.get("template_description")?,
         cover: r.get("cover")?,
         start: r.get("start")?,
         due: r.get("due")?,
@@ -444,14 +446,15 @@ pub fn insert_card_row(conn: &Connection, c: &Card) -> Result<()> {
     conn.execute(
         "INSERT INTO cards(id,board_id,list_id,title,description,position,archived,cover,start,due,
          due_complete,reminder,recurrence,priority,is_milestone,duration_days,work_hours,pct_complete,
-         task_type,units,hours_per_day,constraint_type,constraint_date,wbs,cost,created_at,updated_at,completed_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)",
+         task_type,units,hours_per_day,constraint_type,constraint_date,wbs,cost,created_at,updated_at,completed_at,
+         is_template,template_description)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)",
         params![
             c.id, c.board_id, c.list_id, c.title, c.description, c.position, c.archived as i64,
             c.cover, c.start, c.due, c.due_complete as i64, c.reminder, c.recurrence, c.priority,
             c.is_milestone as i64, c.duration_days, c.work_hours, c.pct_complete, c.task_type,
             c.units, c.hours_per_day, c.constraint_type, c.constraint_date, c.wbs, c.cost,
-            c.created_at, c.updated_at, c.completed_at
+            c.created_at, c.updated_at, c.completed_at, c.is_template as i64, c.template_description
         ],
     )?;
     Ok(())
@@ -463,13 +466,13 @@ pub fn update_card_row(conn: &Connection, c: &Card) -> Result<()> {
          cover=?8, start=?9, due=?10, due_complete=?11, reminder=?12, recurrence=?13, priority=?14,
          is_milestone=?15, duration_days=?16, work_hours=?17, pct_complete=?18, task_type=?19,
          units=?20, hours_per_day=?21, constraint_type=?22, constraint_date=?23, wbs=?24, cost=?25,
-         updated_at=?26, completed_at=?27 WHERE id=?1",
+         updated_at=?26, completed_at=?27, is_template=?28, template_description=?29 WHERE id=?1",
         params![
             c.id, c.board_id, c.list_id, c.title, c.description, c.position, c.archived as i64,
             c.cover, c.start, c.due, c.due_complete as i64, c.reminder, c.recurrence, c.priority,
             c.is_milestone as i64, c.duration_days, c.work_hours, c.pct_complete, c.task_type,
             c.units, c.hours_per_day, c.constraint_type, c.constraint_date, c.wbs, c.cost,
-            c.updated_at, c.completed_at
+            c.updated_at, c.completed_at, c.is_template as i64, c.template_description
         ],
     )?;
     Ok(())
