@@ -151,7 +151,7 @@ fn default_span(card: &Card) -> i64 {
     }
     if let (Some(s), Some(e)) = (&card.start, &card.due) {
         if let (Some(sd), Some(ed)) = (parse_date(s), parse_date(e)) {
-            return (ed - sd).num_days().max(0) as i64;
+            return (ed - sd).num_days().max(0);
         }
     }
     1
@@ -434,7 +434,7 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         )?;
         let mut entries = Vec::with_capacity(nodes.len());
-        for (_, n) in &nodes {
+        for n in nodes.values() {
             let (es, ef, ls, lf) = (n.es, n.ef, n.ls, n.lf);
             let float = match (ef, lf) {
                 (Some(e), Some(l)) => {
@@ -470,14 +470,14 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
         }
         let deadline = board.deadline.as_ref().and_then(|d| parse_date(d));
         let deadline_met = deadline.map(|d| project_finish <= d);
-        return Ok(ScheduleSummary {
+        Ok(ScheduleSummary {
             board_id: board_id.to_string(),
             start: Some(fmt_date(project_start)),
             finish: Some(fmt_date(project_finish)),
             deadline: deadline.map(fmt_date),
             deadline_met,
             cards: entries,
-        });
+        })
     }
 }
 

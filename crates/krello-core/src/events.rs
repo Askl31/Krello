@@ -22,6 +22,9 @@ pub enum Event {
     FieldsUpdated { board_id: String, card_id: Option<String> },
     DependenciesUpdated { board_id: String },
     ScheduleUpdated { board_id: String },
+    /// Reminder fired by the sweep for a card whose reminder moment is reached.
+    /// `title`/`due` travel along so clients can toast without refetching.
+    ReminderDue { board_id: String, card_id: String, title: String, due: String },
     AutomationsUpdated { board_id: String },
     AutomationRan { board_id: String },
     BaselinesUpdated { board_id: String },

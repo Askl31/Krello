@@ -22,9 +22,15 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
 - **Automatisations** locales (Butler-like) : 13 déclencheurs, 15 actions dont
   **cross-board** (copier/créer/déplacer vers un autre board), templates
   `{{card.title}}`…, journal d'exécution — voir [`docs/AUTOMATIONS.md`](docs/AUTOMATIONS.md).
-  Sweep planifié chaque minute.
+  Sweep planifié chaque minute. **Rappels effectifs** : `reminder` (`15m`/`1h`/`1d`/`2d`)
+  déclenche un événement WebSocket `ReminderDue` + toast, une seule fois par carte/échéance.
 - **Undo/redo ⌘Z** (100 opérations), **palette ⌘K**, thèmes clair/sombre,
   WebSocket temps réel, tout en français.
+- **Sauvegardes automatiques** : répertoire au choix dans les Paramètres
+  (sélecteur natif Finder/Explorer dans l'app Krello, saisie manuelle en mode
+  navigateur), intervalle (1 h → 1 semaine) et nombre de copies conservées
+  configurables ; snapshot SQLite compact via `VACUUM INTO`
+  (`krello-backup-<date>.db`), rotation automatique, sauvegarde manuelle en un clic.
 - **Apple Intelligence** (macOS 15.1+, Apple Silicon) : carte/plan de projet en
   langage naturel, résumés, priorités suggérées, reformulation, checklists —
   100 % on-device. Documenté dans [`docs/APPLE_INTELLIGENCE.md`](docs/APPLE_INTELLIGENCE.md).
@@ -112,6 +118,34 @@ calendrier replanifie.
 import/export/automations, IA, intégration HTTP) : `cargo test --workspace`.
 
 ## Journal des modifications
+
+### v0.1.4 — audit : sécurité renforcée + perfs (N+1, streaming, debounce)
+
+- **Garde `Host` anti DNS-rebinding** : toute requête dont l'en-tête `Host`
+  n'est pas loopback (`127.0.0.1`, `localhost`, `[::1]`, avec ou sans port)
+  est rejetée **403** — conforme au plan §5. Sans en-tête `Host` (clients CLI)
+  → autorisé.
+- **404 JSON pour `/api/v1/*` inconnu** : le fallback SPA ne s'applique plus
+  aux routes API (`{"error":"not_found"}` au lieu de `index.html` en 200).
+- **Téléchargement des pièces jointes en streaming** (`ServeFile`) au lieu de
+  bufferiser jusqu'à 64 Mo en mémoire ; support des requêtes `Range` (206).
+  `Content-Type`/`Content-Disposition` validés et assainis (CRLF retiré).
+- **`GET /boards/{id}/cards/meta`** : métadonnées de tout le board en UNE
+  requête (label_ids, compteurs checklists/items cochés/commentaires/pièces
+  jointes) — l'hydratation des tuiles Kanban passe de N requêtes `GET
+  /cards/{id}` à 1 seule.
+- **N+1 éliminés** : items de checklists chargés en un `IN (...)` partagé
+  (`card_detail`, `list_checklists`) ; exports MD/CSV préparent leurs
+  statements hors des boucles.
+- **Export CSV corrigé** : les labels sont résolus par `card_id`, plus par
+  titre (deux cartes de même titre ne se volaient plus leurs labels).
+- **CPM : un seul recompute** par `POST /boards/{id}/schedule` (l'ancien
+  endpoint en calculait deux) + un seul événement `ScheduleUpdated`.
+- **Palette ⌘K** : recherche FTS debouncée à 150 ms avec garde anti-réponses
+  obsolètes.
+- **Tests** : 78 → 86 (garde token API+WS 401, garde Host 403, 404 JSON API,
+  endpoint `cards/meta`, traversal/limite 64 Mo des pièces jointes, unicité de
+  l'événement de recompute).
 
 ### v0.1.3 — raccourci `N` : carte en langage naturel
 

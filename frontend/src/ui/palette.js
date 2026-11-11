@@ -33,6 +33,8 @@ function openPalette() {
   const results = backdrop.querySelector('.results');
   let items = [];
   let selected = 0;
+  let searchTimer = null;
+  let searchSeq = 0;
 
   const close = () => {
     backdrop.style.opacity = '0';
@@ -167,7 +169,18 @@ function openPalette() {
   }
 
   function update() {
-    search(input.value).then((its) => { items = its; selected = 0; render(); }).catch(() => { items = []; render(); });
+    // Debounce 150 ms + ignore les réponses arrivées après une frappe plus récente.
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      const my = ++searchSeq;
+      try {
+        const its = await search(input.value);
+        if (my !== searchSeq) return;
+        items = its; selected = 0; render();
+      } catch {
+        if (my === searchSeq) { items = []; render(); }
+      }
+    }, 150);
   }
 
   input.addEventListener('input', update);

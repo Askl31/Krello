@@ -8,16 +8,50 @@ export function escapeHtml(s) {
     .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-/** Markdown minimal sûr : gras, italique, code, listes, retours ligne. */
+/** Markdown sûr par allowlist : tout le HTML est d'abord échappé, puis les
+ * règles reconnaissent : titres #..###, citations >, blocs ```, code inline,
+ * gras, italique, barré ~~..~~, listes -, liens [texte](url) limités aux
+ * protocoles http/https/mailto (javascript:/data: refusés). */
 export function mdToHtml(src) {
   const esc = escapeHtml(src ?? '');
-  return esc
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|\W)\*([^*]+)\*(?=\W|$)/g, '$1<em>$2</em>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>')
-    .replace(/\n/g, '<br>');
+
+  // 1. Blocs de code ``` extraits d'abord (protégés des règles inline).
+  const blocks = [];
+  let s = esc.replace(/```([\s\S]*?)```/g, (_, code) => {
+    blocks.push(`<pre class="md-code">${code.replace(/^\n/, '')}</pre>`);
+    return `\u0000BLOCK${blocks.length - 1}\u0000`;
+  });
+
+  // 2. Titres (ligne entière)
+  s = s.replace(/^# (.+)$/gm, '<h3>$1</h3>');
+  s = s.replace(/^## (.+)$/gm, '<h4>$1</h4>');
+  s = s.replace(/^### (.+)$/gm, '<h5>$1</h5>');
+
+  // 3. Citations : '>' est déjà échappé en &gt; après escapeHtml
+  s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // 4. Inline : code, gras, italique, barré
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|\W)\*([^*\n]+)\*(?=\W|$)/g, '$1<em>$2</em>');
+  s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+
+  // 5. Liens : protocole restreint, URL déjà échappée (pas de " possible)
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, text, url) => {
+    if (!/^(https?:\/\/|mailto:)/i.test(url)) return text; // protocole refusé → texte seul
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  });
+
+  // 6. Listes
+  s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
+  s = s.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+
+  // 7. Retours à la ligne
+  s = s.replace(/\n/g, '<br>');
+
+  // 8. Restaurer les blocs de code
+  s = s.replace(/\u0000BLOCK(\d+)\u0000/g, (_, i) => `<br>${blocks[Number(i)]}<br>`);
+  return s;
 }
 
 const DAYS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];

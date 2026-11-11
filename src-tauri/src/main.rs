@@ -10,10 +10,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::routing::get;
+use axum::routing::any;
 use krello_core::db::Db;
 use krello_core::service::Service;
-use krello_server::{build_router, embedded_frontend_handler, make_state};
+use krello_server::{build_router, fallback_handler, make_state};
 
 fn app_data_dir() -> PathBuf {
     if cfg!(target_os = "macos") {
@@ -32,6 +32,9 @@ fn app_data_dir() -> PathBuf {
 }
 
 fn main() {
+    // Le serveur in-process partage ce processus : la fenêtre native existe,
+    // on autorise donc le sélecteur de répertoire natif (Finder/Explorer).
+    std::env::set_var("KRELLO_NATIVE_DIALOG", "1");
     let data_dir = app_data_dir();
     let db_path = data_dir.join("krello.db");
     let db = Db::open(&db_path).expect("ouverture de la base Krello impossible");
@@ -50,7 +53,8 @@ fn main() {
                 let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse().unwrap();
 
                 let state = make_state(service_server, None, None);
-                let router = build_router(state).fallback_service(get(embedded_frontend_handler));
+                let router =
+                    build_router(state).fallback_service(any(fallback_handler));
 
                 let webview = tauri::webview::WebviewWindowBuilder::new(
                     &handle,
@@ -76,6 +80,9 @@ fn main() {
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     let svc = Arc::clone(&service_sweep);
                     let _ = tokio::task::spawn_blocking(move || svc.run_scheduled_sweep()).await;
+                    let svc_backup = Arc::clone(&service_sweep);
+                    let _ =
+                        tokio::task::spawn_blocking(move || svc_backup.maybe_auto_backup()).await;
                 }
             });
 

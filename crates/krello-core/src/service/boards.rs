@@ -180,27 +180,25 @@ impl Service {
                     .collect::<rusqlite::Result<_>>()?;
                 v
             };
-            let mut cards = Vec::new();
-            {
+            // Bulk: un jeu fixe de requêtes au lieu d'un snapshot par carte.
+            let cids: Vec<String> = {
                 let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE board_id=?1")?;
-                let cids: Vec<String> = stmt
+                let v = stmt
                     .query_map([id], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<_>>()?;
-                drop(stmt);
-                for cid in cids {
-                    cards.push(snapshot_card(&db.conn, &cid)?);
-                }
-                // purge des fichiers pièces jointes du board
-                let mut st = db.conn.prepare(
-                    "SELECT stored_path FROM attachments WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)",
-                )?;
-                let paths: Vec<String> = st
-                    .query_map([id], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<_>>()?;
-                drop(st);
-                for p in paths {
-                    let _ = std::fs::remove_file(p);
-                }
+                v
+            };
+            let cards = snapshot_cards_bulk(&db.conn, &cids)?;
+            // purge des fichiers pièces jointes du board
+            let mut st = db.conn.prepare(
+                "SELECT stored_path FROM attachments WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)",
+            )?;
+            let paths: Vec<String> = st
+                .query_map([id], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(st);
+            for p in paths {
+                let _ = std::fs::remove_file(p);
             }
             db.conn.execute("DELETE FROM boards WHERE id=?1", [id])?;
             db.conn.execute("DELETE FROM automation_runs WHERE board_id=?1", [id])?;
@@ -232,6 +230,21 @@ impl Service {
             });
         }
         Ok(deleted.len())
+    }
+
+    /// Activity feed for ONE card (newest first) — used by the card modal.
+    pub fn card_activity(&self, board_id: &str, card_id: &str, limit: i64) -> Result<Vec<Activity>> {
+        let db = self.lock_db()?;
+        let mut stmt = db.conn.prepare(
+            "SELECT * FROM activity WHERE board_id=?1 AND card_id=?2 ORDER BY created_at DESC LIMIT ?3",
+        )?;
+        let acts = stmt
+            .query_map(
+                params![board_id, card_id, limit.clamp(1, 500)],
+                row_activity,
+            )?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(acts)
     }
 
     /// Deep-copy a board (labels, lists, non-archived cards with children,

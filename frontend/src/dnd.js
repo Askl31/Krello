@@ -58,6 +58,27 @@ export function draggable(el, opts) {
     let ghost = null;
     let currentTarget = null;
 
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onEsc);
+      document.querySelector('.drop-line')?.remove();
+    };
+
+    const endDrag = (e, cancelled) => {
+      cleanup();
+      if (!moved) return; // simple clic
+      ghost?.remove();
+      el.classList.remove('dragging');
+      active = null;
+
+      if (!cancelled && currentTarget) {
+        currentTarget.classList.remove('drop-over', 'drag-over');
+        opts.onDrop({ x: e.clientX, y: e.clientY, targetEl: currentTarget, ev });
+      }
+    };
+
     const onMove = (e) => {
       if (!moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
       if (!moved) {
@@ -92,24 +113,14 @@ export function draggable(el, opts) {
       }
     };
 
-    const onUp = (e) => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      document.querySelector('.drop-line')?.remove();
-
-      if (!moved) return; // simple clic
-      ghost?.remove();
-      el.classList.remove('dragging');
-      active = null;
-
-      if (currentTarget) {
-        currentTarget.classList.remove('drop-over', 'drag-over');
-        opts.onDrop({ x: e.clientX, y: e.clientY, targetEl: currentTarget, ev });
-      }
-    };
+    const onUp = (e) => endDrag(e, false);
+    const onCancel = () => endDrag({ clientX: start.x, clientY: start.y }, true);
+    const onEsc = (e) => { if (e.key === 'Escape') onCancel(); };
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onEsc);
   });
 }
 

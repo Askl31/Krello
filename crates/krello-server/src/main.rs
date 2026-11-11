@@ -83,6 +83,20 @@ async fn main() {
         });
     }
 
+    // Automatic database backups: checked on the same cadence, fires only when
+    // the configured interval (default 24h) has elapsed and a directory is set.
+    {
+        let service = service.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                let svc = service.clone();
+                let _ = tokio::task::spawn_blocking(move || svc.maybe_auto_backup()).await;
+            }
+        });
+    }
+
     let state = make_state(service, token, ai);
     if let Some(dir) = frontend_dir() {
         tracing::info!("frontend disponible sur disque ({}) et embarqué", dir.display());
@@ -90,7 +104,9 @@ async fn main() {
         tracing::info!("frontend servi depuis les assets embarqués");
     }
     let app = build_router(state)
-        .fallback_service(axum::routing::get(krello_server::embedded_frontend_handler));
+        // `any` (pas `get`) : un POST/PUT/DELETE vers une route inconnue doit
+        // retomber sur le fallback (404 JSON pour /api/*), pas sur un 405.
+        .fallback_service(axum::routing::any(krello_server::fallback_handler));
 
     if open_browser {
         let url = format!("http://{addr}/");

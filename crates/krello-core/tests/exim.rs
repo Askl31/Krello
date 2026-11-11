@@ -209,3 +209,27 @@ fn json_export_import_roundtrips_automations_with_remapped_ids() {
     let comments = s.list_comments(&c.id).unwrap();
     assert!(comments.iter().any(|cm| cm.body.starts_with("Vu le")), "action comment de la règle importée");
 }
+
+#[test]
+fn ics_export_contains_dtend_for_both_due_kinds() {
+    let s = test_service();
+    let (b, l) = board_with_list(&s);
+    let c1 = make_card(&s, &l, "échéance date");
+    s.update_card(&c1.id, UpdateCard {
+        due: Some("2026-12-05".into()),
+        ..Default::default()
+    }).unwrap();
+    let c2 = make_card(&s, &l, "échéance horodatée");
+    s.update_card(&c2.id, UpdateCard {
+        due: Some("2026-12-06T14:30:00".into()),
+        ..Default::default()
+    }).unwrap();
+
+    let (_name, _mime, ics) = s
+        .with_db(|conn| export_board(conn, &b, ExportFormat::parse("ics").unwrap()))
+        .unwrap();
+    assert!(ics.contains("DTSTART;VALUE=DATE:20261205"));
+    assert!(ics.contains("DTEND;VALUE=DATE:20261206"), "date sans heure: DTEND exclusif = lendemain");
+    assert!(ics.contains("DTSTART:20261206T143000"));
+    assert!(ics.contains("DTEND:20261206T143000"), "échéance horodatée: DTEND explicite");
+}

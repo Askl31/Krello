@@ -34,6 +34,9 @@ impl Service {
             due: c.due,
             due_complete: c.due_complete.unwrap_or(false),
             reminder: c.reminder,
+            reminder_sent_at: None,
+            time_spent_minutes: 0,
+            tracking_started_at: None,
             recurrence: c.recurrence,
             priority: c.priority.unwrap_or_else(|| "none".into()),
             is_milestone: c.is_milestone.unwrap_or(false),
@@ -181,9 +184,13 @@ impl Service {
         }
         if u.due.is_some() {
             after.due = u.due;
+            // Nouvelle échéance → le rappel se réarme.
+            after.reminder_sent_at = None;
         }
         if let Some(v) = u.reminder {
-            after.reminder = Some(v);
+            // Chaîne vide = supprimer le rappel (l'UI envoie "" pour « Aucun »).
+            after.reminder = if v.is_empty() { None } else { Some(v) };
+            after.reminder_sent_at = None;
         }
         if u.recurrence.is_some() {
             after.recurrence = u.recurrence;
@@ -221,6 +228,17 @@ impl Service {
         if let Some(v) = u.cost {
             after.cost = v;
         }
+        if let Some(v) = u.time_spent_minutes {
+            // Incrément (pas remplacement) : les méthodes de tracking envoient
+            // le delta ; un PATCH direct règle la valeur absolue (≥ 0).
+            after.time_spent_minutes = (after.time_spent_minutes + v.max(0)) as i64;
+        }
+        if u.tracking_started_at.is_some() {
+            // "" = arrêter le suivi (Some(None) impossible en Option<String>)
+            after.tracking_started_at = u
+                .tracking_started_at
+                .filter(|v| !v.is_empty());
+        }
         if let Some(v) = u.archived {
             after.archived = v;
         }
@@ -234,6 +252,62 @@ impl Service {
         after.updated_at = now_updated();
         update_card_row(&db.conn, &after)?;
 
+        // Récurrence: compléter une carte récurrente crée l'occurrence suivante
+        // (même liste et attributs, échéance avancée d'un cran) dans la même
+        // transaction; l'undo/redo de l'ensemble reste une seule entrée.
+        // Une récurrence malformée ne bloque JAMAIS la complétion: elle est
+        // ignorée (log d'activité côté carte suivante seulement si créée).
+        let mut successor: Option<Card> = None;
+        if !before.due_complete && after.due_complete {
+            if let (Some(rec), Some(due)) = (after.recurrence.clone(), after.due.clone()) {
+                match next_recurrence_due(&rec, &due) {
+                    Ok(Some(next_due)) => {
+                        let mut next = after.clone();
+                        next.id = new_id("card");
+                        next.due = Some(next_due.clone());
+                        // Avancer `start` du même delta en jours calendaires.
+                        if let Some(sd) = after.start.as_deref().and_then(crate::time::parse_date) {
+                            if let (Some(od), Some(nd)) =
+                                (crate::time::parse_date(&due), crate::time::parse_date(&next_due))
+                            {
+                                let delta = crate::time::days_between(od, nd);
+                                next.start = Some(
+                                    crate::time::add_days(sd, delta).to_string(),
+                                );
+                            }
+                        }
+                        next.due_complete = false;
+                        next.completed_at = None;
+                        next.pct_complete = 0;
+                        next.reminder_sent_at = None;
+                        next.archived = false;
+                        next.position = next_card_position(&db.conn, &after.list_id)?;
+                        next.created_at = now_rfc3339();
+                        next.updated_at = next.created_at.clone();
+                        insert_card_row(&db.conn, &next)?;
+                        log_activity(
+                            &db.conn,
+                            &next.board_id,
+                            Some(&next.id),
+                            "recurrence_next",
+                            &serde_json::json!({ "from": after.id, "due": next.due }),
+                        )?;
+                        successor = Some(next);
+                    }
+                    Ok(None) => { /* série terminée (until atteint) */ }
+                    Err(e) => {
+                        log_activity(
+                            &db.conn,
+                            &after.board_id,
+                            Some(&after.id),
+                            "recurrence_error",
+                            &serde_json::json!({ "error": e.to_string() }),
+                        )?;
+                    }
+                }
+            }
+        }
+
         let schedule_changed = before.start != after.start
             || before.due != after.due
             || before.constraint_type != after.constraint_type
@@ -246,15 +320,19 @@ impl Service {
             || before.is_milestone != after.is_milestone;
         let archived_now = !before.archived && after.archived;
         let board_id = after.board_id.clone();
+        let mut actions = vec![UndoAction::CardUpdated {
+            before,
+            after: after.clone(),
+        }];
+        if let Some(next) = &successor {
+            actions.push(UndoAction::CardCreated(next.clone()));
+        }
         let entry = UndoEntry {
             label: format!("Modification de la carte « {} »", after.title),
-            actions: vec![UndoAction::CardUpdated {
-                before,
-                after: after.clone(),
-            }],
+            actions,
         };
         drop(db);
-        if schedule_changed {
+        if schedule_changed || successor.is_some() {
             self.recompute_and_notify(&board_id)?;
         }
         self.push_undo(entry);
@@ -262,6 +340,12 @@ impl Service {
             board_id: board_id.clone(),
             card_id: id.to_string(),
         });
+        if let Some(next) = successor {
+            self.emit(Event::CardCreated {
+                board_id: board_id.clone(),
+                card_id: next.id.clone(),
+            });
+        }
         if archived_now {
             self.run_automations(
                 &board_id,
@@ -407,6 +491,13 @@ impl Service {
             board_id: board_id.clone(),
             card_id: id.to_string(),
         });
+        if from_board != board_id {
+            // Le board d'origine doit aussi se rafraîchir (la carte l'a quitté).
+            self.emit(Event::CardMoved {
+                board_id: from_board.clone(),
+                card_id: id.to_string(),
+            });
+        }
         self.run_automations(
             &board_id,
             "card_moved",
@@ -645,6 +736,7 @@ impl Service {
         card.due_complete = false;
         card.completed_at = None;
         card.reminder = None;
+        card.reminder_sent_at = None;
         card.recurrence = None;
         card.constraint_type = "asap".into();
         card.constraint_date = None;
@@ -845,21 +937,16 @@ impl Service {
                 .query_map([id], row_checklist)?
                 .collect::<rusqlite::Result<_>>()?;
             drop(stmt);
-            let mut out = Vec::with_capacity(cls.len());
-            for cl in cls {
-                let items: Vec<ChecklistItem> = {
-                    let mut s = db.conn.prepare(
-                        "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-                    )?;
-                    let v = s
-                        .query_map([&cl.id], row_checklist_item)?
-                        .collect::<rusqlite::Result<_>>()?;
-                    v
-                };
-                out.push(serde_json::to_value(ChecklistWithItems { checklist: cl, items })
-                    .unwrap_or_default());
-            }
-            out
+            let ids: Vec<String> = cls.iter().map(|c| c.id.clone()).collect();
+            let mut items_by_cl =
+                super::checklists::items_for_checklists(&db.conn, &ids)?;
+            cls.into_iter()
+                .map(|cl| {
+                    let items = items_by_cl.remove(&cl.id).unwrap_or_default();
+                    serde_json::to_value(ChecklistWithItems { checklist: cl, items })
+                        .unwrap_or_default()
+                })
+                .collect()
         };
         let comments: Vec<Comment> = {
             let mut stmt =
@@ -926,6 +1013,166 @@ impl Service {
             "dependencies_in": deps_in,
             "schedule": schedule,
         }))
+    }
+
+    /// Lightweight per-card metadata for a whole board, in a fixed number of
+    /// queries (no N+1): label ids + checklist/comment/attachment counts.
+    /// Used by the frontend to hydrate tiles without one request per card.
+    pub fn cards_meta(&self, board_id: &str) -> Result<serde_json::Value> {
+        let db = self.lock_db()?;
+        let c = &db.conn;
+        query_board(c, board_id)?.ok_or_else(|| Error::NotFound(format!("board {board_id}")))?;
+
+        let mut label_ids: HashMap<String, Vec<String>> = HashMap::new();
+        {
+            let mut stmt = c.prepare(
+                "SELECT cl.card_id, cl.label_id FROM card_labels cl
+                 JOIN cards cd ON cd.id = cl.card_id
+                 WHERE cd.board_id=?1 AND cd.archived=0",
+            )?;
+            let rows = stmt.query_map([board_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            for r in rows {
+                let (cid, lid) = r?;
+                label_ids.entry(cid).or_default().push(lid);
+            }
+        }
+        // items_total / items_done per card (LEFT JOIN keeps cards without checklists)
+        let mut cl_items: HashMap<String, (i64, i64, i64)> = HashMap::new();
+        {
+            let mut stmt = c.prepare(
+                "SELECT ch.card_id, COUNT(DISTINCT ch.id), COUNT(i.id), COALESCE(SUM(i.checked), 0)
+                 FROM checklists ch
+                 JOIN cards cd ON cd.id = ch.card_id
+                 LEFT JOIN checklist_items i ON i.checklist_id = ch.id
+                 WHERE cd.board_id=?1 AND cd.archived=0
+                 GROUP BY ch.card_id",
+            )?;
+            let rows = stmt.query_map([board_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?;
+            for r in rows {
+                let (cid, ncl, total, done) = r?;
+                cl_items.insert(cid, (ncl, total, done));
+            }
+        }
+        let mut comments_count: HashMap<String, i64> = HashMap::new();
+        {
+            let mut stmt = c.prepare(
+                "SELECT card_id, COUNT(*) FROM comments
+                 WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
+                 GROUP BY card_id",
+            )?;
+            let rows = stmt.query_map([board_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for r in rows {
+                let (cid, n) = r?;
+                comments_count.insert(cid, n);
+            }
+        }
+        let mut attachments_count: HashMap<String, i64> = HashMap::new();
+        {
+            let mut stmt = c.prepare(
+                "SELECT card_id, COUNT(*) FROM attachments
+                 WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1 AND archived=0)
+                 GROUP BY card_id",
+            )?;
+            let rows = stmt.query_map([board_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for r in rows {
+                let (cid, n) = r?;
+                attachments_count.insert(cid, n);
+            }
+        }
+
+        let mut card_ids: Vec<String> = Vec::new();
+        {
+            let mut stmt = c.prepare(
+                "SELECT id FROM cards WHERE board_id=?1 AND archived=0",
+            )?;
+            let rows = stmt.query_map([board_id], |r| r.get::<_, String>(0))?;
+            for r in rows {
+                card_ids.push(r?);
+            }
+        }
+        let mut map = serde_json::Map::new();
+        for cid in card_ids {
+            let (ncl, total, done) = cl_items.get(&cid).copied().unwrap_or((0, 0, 0));
+            let labels = label_ids.get(&cid).cloned().unwrap_or_default();
+            let comments = comments_count.get(&cid).copied().unwrap_or(0);
+            let atts = attachments_count.get(&cid).copied().unwrap_or(0);
+            map.insert(
+                cid,
+                serde_json::json!({
+                    "label_ids": labels,
+                    "checklists_count": ncl,
+                    "checklist_items": total,
+                    "checklist_done": done,
+                    "comments_count": comments,
+                    "attachments_count": atts,
+                }),
+            );
+        }
+        Ok(serde_json::Value::Object(map))
+    }
+}
+
+/// Advance `due` by one recurrence step (`{"freq":"daily|weekly|monthly",
+/// "interval":n,"until":"YYYY-MM-DD"}`). Returns `Ok(None)` when the series is
+/// over (`until` reached), the frequency is unknown, or the interval is <= 0.
+/// Date-only dues stay date-only; timed dues keep their time of day.
+pub fn next_recurrence_due(recurrence: &str, due: &str) -> Result<Option<String>> {
+    fn default_interval() -> i64 {
+        1
+    }
+    #[derive(serde::Deserialize)]
+    struct Spec {
+        freq: String,
+        #[serde(default = "default_interval")]
+        interval: i64,
+        until: Option<String>,
+    }
+    let spec: Spec = serde_json::from_str(recurrence)
+        .map_err(|e| Error::Validation(format!("récurrence invalide: {e}")))?;
+    let original = crate::time::parse_dt(due)
+        .ok_or_else(|| Error::Validation(format!("échéance invalide pour la récurrence: {due}")))?;
+    let interval = spec.interval.max(1);
+    let advanced = match spec.freq.as_str() {
+        "daily" => original.date().checked_add_signed(chrono::Duration::days(interval)),
+        "weekly" => original.date().checked_add_signed(chrono::Duration::days(interval * 7)),
+        "monthly" => original
+            .date()
+            .checked_add_months(chrono::Months::new(interval as u32)),
+        other => {
+            return Err(Error::Validation(format!(
+                "fréquence de récurrence inconnue: {other} (daily|weekly|monthly)"
+            )))
+        }
+    };
+    let Some(new_date) = advanced else {
+        return Ok(None);
+    };
+    if let Some(until) = spec.until.as_deref().and_then(crate::time::parse_date) {
+        if new_date > until {
+            return Ok(None); // série terminée
+        }
+    }
+    if crate::time::is_date_only(due) {
+        Ok(Some(new_date.to_string()))
+    } else {
+        Ok(Some(format!(
+            "{}T{}",
+            new_date.format("%Y-%m-%d"),
+            original.format("%H:%M:%S")
+        )))
     }
 }
 

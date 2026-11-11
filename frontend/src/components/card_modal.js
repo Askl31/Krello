@@ -115,6 +115,107 @@ export async function openCardModal(cardId, { onChange } = {}) {
     </div>`;
   }
 
+  // --- F13 : suivi du temps (▶ démarrer / ⏸ arrêter + cumul affiché)
+  function fmtMinutes(total) {
+    if (!total) return '0 min';
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return h ? `${h} h ${m ? `${String(m).padStart(2, '0')} min` : ''}` : `${m} min`;
+  }
+  function runningMinutes(card) {
+    if (!card.tracking_started_at) return 0;
+    const started = new Date(card.tracking_started_at.replace(' ', 'T'));
+    if (isNaN(started)) return 0;
+    return Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
+  }
+  function renderTracking(container, close) {
+    const card = detail.card;
+    const running = !!card.tracking_started_at;
+    const total = (card.time_spent_minutes || 0) + runningMinutes(card);
+    container.innerHTML = `
+      <span class="badge" style="color:${running ? 'var(--success)' : 'var(--muted)'}">${running ? `● en cours (${fmtMinutes(runningMinutes(card))})` : '● à l\'arrêt'}</span>
+      <b style="font-size:13px">${fmtMinutes(total)}</b>
+      <button class="btn sm ${running ? '' : 'primary'}" id="cm-track-toggle">${running ? '⏸ Arrêter' : '▶ Démarrer'}</button>
+      ${card.time_spent_minutes ? '<button class="btn sm ghost" id="cm-track-reset" title="Remettre le compteur à zéro">Réinitialiser</button>' : ''}`;
+    container.querySelector('#cm-track-toggle').onclick = async () => {
+      try {
+        if (running) {
+          const minutes = runningMinutes(card);
+          detail.card = await api.updateCard(card.id, { time_spent_minutes: minutes, tracking_started_at: '' });
+        } else {
+          detail.card = await api.updateCard(card.id, { tracking_started_at: new Date().toISOString() });
+        }
+        notify();
+        renderTracking(container, close);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    const reset = container.querySelector('#cm-track-reset');
+    if (reset) reset.onclick = async () => {
+      try {
+        if (running) await api.updateCard(card.id, { tracking_started_at: '' });
+        detail.card = await api.updateCard(card.id, { time_spent_minutes: -(card.time_spent_minutes || 0) });
+        notify();
+        renderTracking(container, close);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  }
+
+  // --- F11 : activité de la carte (flux filtré par card_id)
+  const ACTIVITY_LABELS = {
+    card_created: 'Création',
+    card_updated: 'Modification',
+    card_moved: 'Déplacement',
+    card_duplicated: 'Duplication',
+    card_archived: 'Archivage',
+    card_unarchived: 'Désarchivage',
+    card_deleted: 'Suppression',
+    card_labeled: 'Label ajouté',
+    card_unlabeled: 'Label retiré',
+    card_commented: 'Commentaire',
+    checklist_item_checked: 'Case cochée',
+    checklist_item_added: 'Élément de checklist',
+    attachment_added: 'Pièce jointe',
+    attachment_deleted: 'Pièce jointe retirée',
+    cover_changed: 'Couverture',
+    field_set: 'Champ personnalisé',
+    recurrence_next: 'Récurrence',
+    recurrence_error: 'Erreur de récurrence',
+    tracking_started: 'Suivi démarré',
+    tracking_stopped: 'Suivi arrêté',
+    dependency_added: 'Dépendance ajoutée',
+    dependency_removed: 'Dépendance retirée',
+    baseline_created: 'Baseline créée',
+  };
+  function activityDetail(kind, payload) {
+    let p; try { p = JSON.parse(payload || '{}'); } catch { return ''; }
+    if (kind === 'card_moved') {
+      const from = p.from_list_title || p.from_list_id || '';
+      const to = p.to_list_title || p.to_list_id || '';
+      return from && to ? `${from} → ${to}` : '';
+    }
+    if (kind === 'attachment_added') return p.filename || '';
+    if (kind === 'recurrence_next') return p.due ? `prochaine échéance : ${p.due}` : '';
+    if (kind === 'dependency_added') return p.predecessor_id ? `${p.predecessor_id} → ${p.successor_id}` : '';
+    return '';
+  }
+  async function renderActivity(container) {
+    try {
+      const acts = await api.boardActivity(detail.card.board_id, 30, detail.card.id);
+      container.innerHTML = acts.map((a) => {
+        const label = ACTIVITY_LABELS[a.kind] || a.kind;
+        const when = (a.created_at || '').replace('T', ' ').slice(0, 16);
+        const detailTxt = activityDetail(a.kind, a.payload);
+        return `<div class="act-row" style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12px;border-bottom:1px solid var(--border)">
+          <span class="badge" style="flex:none">${escapeHtml(label)}</span>
+          <span class="muted" style="flex:none">${escapeHtml(when)}</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(detailTxt)}</span>
+        </div>`;
+      }).join('') || '<span class="muted">Aucune activité pour cette carte.</span>';
+    } catch (e) {
+      container.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+    }
+  }
+
   function render() {
     const card = detail.card;
     const labelIds = (detail.labels || []).map((l) => l.id);
@@ -124,6 +225,9 @@ export async function openCardModal(cardId, { onChange } = {}) {
     const { el, close } = openModal(`
       <div class="modal-head">
         <h2 data-edit="title" title="Cliquez pour modifier le titre" style="cursor:pointer">${escapeHtml(card.title)}</h2>
+        <button class="iconbtn" id="cm-copy-link" title="Copier le lien de la carte">
+          ${icon('copy', { size: 16 })}
+        </button>
         ${state.aiStatus?.available ? `
           <button class="iconbtn" id="cm-ai" title="Assistant IA Apple Intelligence">
             ${icon('ai', { size: 16 })}
@@ -178,6 +282,21 @@ export async function openCardModal(cardId, { onChange } = {}) {
 
           <div class="side">
             <div class="modal-section">
+              <div class="label">Emplacement</div>
+              <div class="row" style="gap:8px">
+                <select class="input" id="cm-move-board" style="flex:1" title="Board">
+                  ${(state.boards?.length ? state.boards : [{ id: card.board_id, title: 'Board courant' }])
+                    .map((b) => `<option value="${b.id}" ${b.id === card.board_id ? 'selected' : ''}>${escapeHtml(b.title)}</option>`)
+                    .join('')}
+                </select>
+                <select class="input" id="cm-move-list" style="flex:1" title="Liste">
+                  <option value="${card.list_id}" selected>${escapeHtml(visibleLists().find((l) => l.id === card.list_id)?.title || 'Liste courante')}</option>
+                </select>
+              </div>
+              <div class="muted" style="font-size:11.5px;margin-top:6px">Déplacer vers un autre board : la carte voyage seule, ses labels et champs personnalisés (propres au board d'origine) ne suivent pas.</div>
+            </div>
+
+            <div class="modal-section">
               <div class="label">Modèle</div>
               ${card.is_template ? `
                 <div class="field">
@@ -214,6 +333,16 @@ export async function openCardModal(cardId, { onChange } = {}) {
               <div class="field">
                 <label>Date de début</label>
                 <input type="date" class="input" id="cm-start" value="${dateOnly(card.start)}" />
+              </div>
+              <div class="field">
+                <label>Rappel</label>
+                <select class="input" id="cm-reminder">
+                  <option value="" ${card.reminder ? '' : 'selected'}>Aucun</option>
+                  <option value="15m" ${card.reminder === '15m' ? 'selected' : ''}>15 min avant l'échéance</option>
+                  <option value="1h" ${card.reminder === '1h' ? 'selected' : ''}>1 h avant</option>
+                  <option value="1d" ${card.reminder === '1d' ? 'selected' : ''}>1 jour avant</option>
+                  <option value="2d" ${card.reminder === '2d' ? 'selected' : ''}>2 jours avant</option>
+                </select>
               </div>
               `}
               <div class="field">
@@ -253,6 +382,16 @@ export async function openCardModal(cardId, { onChange } = {}) {
                     <span class="chip-label" style="background:${l.color}">${escapeHtml(l.name || '•')}</span>
                   </label>`).join('') || '<span class="muted">Aucun label sur ce board</span>'}
               </div>
+            </div>
+
+            <div class="modal-section">
+              <div class="label">Temps passé</div>
+              <div class="row" id="cm-tracking" style="gap:8px;align-items:center"></div>
+            </div>
+
+            <div class="modal-section">
+              <div class="label">Activité</div>
+              <div id="cm-activity"><span class="muted">…</span></div>
             </div>
 
             ${state.fields.length ? `
@@ -299,7 +438,15 @@ export async function openCardModal(cardId, { onChange } = {}) {
             </div>
           </div>
         </div>
-      </div>`, { id: 'card-modal', size: 'lg' });
+      </div>`, { id: 'card-modal', size: 'lg', onClose: () => clearInterval(window.__cmTrackTimer) });
+
+    // F13 : suivi du temps (temps en cours rafraîchi toutes les 30 s)
+    renderTracking(el.querySelector('#cm-tracking'), close);
+    if (window.__cmTrackTimer) clearInterval(window.__cmTrackTimer);
+    window.__cmTrackTimer = setInterval(() => renderTracking(el.querySelector('#cm-tracking'), close), 30000);
+
+    // F11 : activité de la carte
+    renderActivity(el.querySelector('#cm-activity'));
 
     bind(el, close);
     return { el, close };
@@ -422,6 +569,17 @@ export async function openCardModal(cardId, { onChange } = {}) {
   function bind(el, close) {
     const card = detail.card;
 
+    // --- copier le lien profond de la carte
+    el.querySelector('#cm-copy-link')?.addEventListener('click', async () => {
+      const url = `${location.origin}${location.pathname}#/b/${card.board_id}/board/c/${card.id}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('Lien de la carte copié', 'ok');
+      } catch {
+        toast('Copie impossible dans ce contexte', 'err');
+      }
+    });
+
     // --- titre inline
     const title = el.querySelector('[data-edit=title]');
     title.addEventListener('click', async () => {
@@ -469,6 +627,28 @@ export async function openCardModal(cardId, { onChange } = {}) {
       } catch (err) { toast(err.message, 'err'); }
     };
 
+    // --- déplacement inter-listes / inter-boards
+    const moveBoard = el.querySelector('#cm-move-board');
+    const moveList = el.querySelector('#cm-move-list');
+    const fillMoveLists = async (boardId) => {
+      let lists = boardId === card.board_id
+        ? state.lists
+        : await api.lists(boardId).catch(() => []);
+      lists = (lists || []).filter((l) => !l.archived);
+      moveList.innerHTML = lists.map((l) =>
+        `<option value="${l.id}" ${l.id === card.list_id ? 'selected' : ''}>${escapeHtml(l.title)}</option>`
+      ).join('') || '<option value="">—</option>';
+    };
+    moveBoard?.addEventListener('change', () => fillMoveLists(moveBoard.value));
+    moveList?.addEventListener('change', async () => {
+      if (!moveList.value) return;
+      try {
+        await api.moveCard(card.id, { list_id: moveList.value });
+        toast('Carte déplacée', 'ok');
+        close();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+
     // --- attributs
     const upd = (patch) => api.updateCard(card.id, patch).then((c) => {
       detail.card = c;
@@ -487,6 +667,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
     });
     el.querySelector('#cm-due-complete')?.addEventListener('change', (e) => upd({ due_complete: e.target.checked }));
     el.querySelector('#cm-start')?.addEventListener('change', (e) => upd({ start: e.target.value || null }));
+    el.querySelector('#cm-reminder')?.addEventListener('change', (e) => upd({ reminder: e.target.value }));
     el.querySelector('#cm-priority').onchange = (e) => upd({ priority: e.target.value });
     el.querySelector('#cm-duration').onchange = (e) => upd({ duration_days: e.target.value === '' ? null : Number(e.target.value) });
     el.querySelector('#cm-work').onchange = (e) => upd({ work_hours: e.target.value === '' ? null : Number(e.target.value) });

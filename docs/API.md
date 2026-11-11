@@ -2,6 +2,8 @@
 
 Toutes les réponses sont en JSON (sauf exports). Erreurs :
 `{"error": "validation|not_found|conflict|dependency_cycle|ai_unavailable|internal", "message": "…"}`.
+Un corps JSON non conforme au schéma du endpoint (champ manquant/typé) est
+rejeté **422** par la couche de désérialisation axum (payload typés).
 
 ## Santé
 | | |
@@ -18,6 +20,7 @@ Toutes les réponses sont en JSON (sauf exports). Erreurs :
 | `GET /boards/{id}/activity?limit=` | flux d'activité |
 | `GET /boards/{id}/lists` `POST` | listes |
 | `GET /boards/{id}/cards?include_archived=` `POST` | cartes |
+| `GET /boards/{id}/cards/meta` | métadonnées par carte en UNE requête : `{card_id: {label_ids, checklists_count, checklist_items, checklist_done, comments_count, attachments_count}}` (hydratation des tuiles sans N+1) |
 | `GET /boards/{id}/labels` `POST` | labels |
 | `GET /boards/{id}/fields` `POST` | champs personnalisés (définitions) |
 | `GET /boards/{id}/dependencies` `POST` | dépendances |
@@ -31,8 +34,9 @@ Toutes les réponses sont en JSON (sauf exports). Erreurs :
 | | |
 |---|---|
 | `GET/PATCH/DELETE /lists/{id}` · `GET /lists/{id}/count` | count → `{count, wip_exceeded}` |
+| `POST /lists/{id}/duplicate` | duplie la liste : cartes non-archivées avec labels, checklists, champs personnalisés et pièces jointes (**fichiers dupliqués physiquement**) ; dépendances non copiées ; undoable en une opération |
 | `GET /cards/{id}` | détail complet : `{card, labels, checklists:[{…,items}], comments, attachments, custom_fields, dependencies_in/out, schedule}` |
-| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) |
+| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminder`: `"15m"\|"1h"\|"1d"\|"2d"` ou datetime ISO — **`""` = supprimer le rappel** ; tout changement de `due`/`reminder` réarme le rappel |
 | `DELETE /cards/{id}` | suppression (undoable) |
 | `POST /cards/{id}/move` | `{list_id?, position? \| before? \| after?}` (cross-board ok) |
 | `POST /cards/{id}/duplicate` | copie + enfants |
@@ -66,6 +70,19 @@ Actions cross-board possibles (`list_id` de n'importe quel board) : `move, copy,
 ## Calendriers
 `GET/POST /calendars` `{name, weekends?: "[6,0]", holidays?: "[\"2027-01-01\"]", hours_per_day?}` · `PATCH/DELETE /calendars/{id}`.
 
+## Réglages — sauvegardes automatiques
+| | |
+|---|---|
+| `GET /settings/backup` | `{backup_dir, interval_hours, keep, last_backup_at, last_backup_file}` (défauts : dir null = désactivé, 24 h, 10 copies) |
+| `PUT /settings/backup` | `{backup_dir? ("": désactive), interval_hours? (1..720), keep? (1..100)}` — répertoire créé si besoin, 400 si inutilisable |
+| `POST /settings/backup/run` | sauvegarde immédiate → `{file, size}` ; 400 sans répertoire configuré |
+| `POST /settings/backup/pick` | ouvre le **sélecteur natif** de répertoire (Finder/Explorer) → `{dir: "…"\|null}` ; **400 hors app native** (fenêtre uniquement, mode navigateur → saisie manuelle) |
+
+Mécanique : `VACUUM INTO` → `krello-backup-<YYYY-MM-DD-HHMMSS>.db` (base complète
+compacte, ouvrable telle quelle) ; rotation automatique au-delà de `keep`.
+Le serveur vérifie chaque minute : sauvegarde dès que `interval_hours` est écoulé.
+Rien n'est undoable ni journalisé dans `activity` (réglages globaux).
+
 ## Recherche & import
 `GET /search?q=&board_id=&list_id=&label_id=&priority=&due_before=&due_after=&has_due=` (FTS5 + filtres)
 `POST /import/trello` (body = JSON export Trello) · `POST /import/krello` (round-trip export).
@@ -88,5 +105,7 @@ Actions cross-board possibles (`list_id` de n'importe quel board) : `move, copy,
 `GET /ws` — événements serveur : `BoardCreated/Updated/Deleted`, `ListCreated/Updated/Deleted`,
 `CardCreated/Updated/Moved/Deleted`, `LabelsUpdated`, `ChecklistsUpdated`, `CommentsUpdated`,
 `AttachmentsUpdated`, `FieldsUpdated`, `DependenciesUpdated`, `ScheduleUpdated`,
-`AutomationsUpdated`, `BaselinesUpdated`, `CalendarsUpdated`, `UndoApplied`, `resync`.
+`AutomationsUpdated`, `BaselinesUpdated`, `CalendarsUpdated`, `UndoApplied`, `resync`,
+`ReminderDue` (rappel déclenché par le sweep : `{board_id, card_id, title, due}` — une seule
+fois par carte/échéance ; réémis si `due` ou `reminder` change).
 Format : `{"type": "...", "data": {...}}`.

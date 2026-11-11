@@ -1,18 +1,25 @@
 // Tuile de carte Kanban + drag & drop.
 
 import { escapeHtml, dueBadge, priorityBadge, progressPct } from '../format.js';
+import { api } from '../api.js';
+import { toast } from '../ui/modal.js';
 import { draggable } from '../dnd.js';
 import { state } from '../state.js';
 import { openCardModal } from './card_modal.js';
 import { icon } from '../icons.js';
 
-export function cardTileHtml(card) {
+export function cardTileHtml(card, opts = {}) {
   const labels = (card._label_ids || [])
     .map((id) => state.labels.find((l) => l.id === id))
     .filter(Boolean);
-  const pct = card._checklists ? progressPct(card._checklists) : null;
+  const pct = card._checklists
+    ? progressPct(card._checklists)
+    : card._checklist_total
+      ? Math.round((100 * card._checklist_done) / card._checklist_total)
+      : null;
   const cover = card.cover ? safeCover(card.cover) : '';
   const hasCover = !!cover;
+  const selected = !!opts.selected;
   const milestone = card.is_milestone
     ? `<span class="badge" style="color:var(--warning);background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning)35%,transparent)">${icon('milestone', { size: 10 })} jalon</span>`
     : '';
@@ -28,7 +35,7 @@ export function cardTileHtml(card) {
   ].join('');
 
   return `
-    <div class="card-tile ${hasCover ? 'has-cover' : ''}" data-card="${card.id}">
+    <div class="card-tile ${hasCover ? 'has-cover' : ''} ${selected ? 'selected' : ''}" data-card="${card.id}">
       ${cover}
       <div class="title ${card.due_complete ? 'done' : ''}">${escapeHtml(card.title)}</div>
       <div class="meta">
@@ -55,8 +62,36 @@ function safeCover(coverJson) {
   return '';
 }
 
-export function attachCardTile(el, card, { onChange }) {
-  el.addEventListener('click', () => openCardModal(card.id, { onChange }));
+export function attachCardTile(el, card, { onChange, onClick } = {}) {
+  el.addEventListener('click', (ev) => {
+    if (onClick) return onClick(ev);
+    openCardModal(card.id, { onChange });
+  });
+
+  // Pièces jointes par glisser-déposer de fichiers depuis l'extérieur
+  // (bureau / explorateur). Le DnD interne utilise Pointer Events, il n'y a
+  // donc pas de conflit avec le drag HTML5 natif des fichiers.
+  el.addEventListener('dragover', (e) => {
+    if (![...e.dataTransfer?.types || []].includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    el.classList.add('file-over');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('file-over'));
+  el.addEventListener('drop', async (e) => {
+    if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+    e.preventDefault();
+    el.classList.remove('file-over');
+    const files = [...e.dataTransfer.files];
+    if (!files.length) return;
+    let ok = 0, fail = 0;
+    for (const f of files) {
+      try { await api.uploadAttachment(card.id, f); ok++; }
+      catch (err) { fail++; toast(err.message, 'err'); }
+    }
+    if (ok) toast(`${ok} pièce(s) jointe(s) ajoutée(s) à « ${card.title.slice(0, 30)} »`, 'ok');
+    onChange?.();
+  });
 
   draggable(el, {
     kind: 'card',

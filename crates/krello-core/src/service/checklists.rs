@@ -1,5 +1,7 @@
 //! Checklists and items with ordered positions.
 
+use std::collections::HashMap;
+
 use rusqlite::{params, OptionalExtension};
 
 use super::{Service};
@@ -76,17 +78,15 @@ impl Service {
             .query_map([card_id], row_checklist)?
             .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
-        let mut out = Vec::with_capacity(cls.len());
-        for cl in cls {
-            let mut stmt = db.conn.prepare(
-                "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-            )?;
-            let items: Vec<ChecklistItem> = stmt
-                .query_map([&cl.id], row_checklist_item)?
-                .collect::<rusqlite::Result<_>>()?;
-            drop(stmt);
-            out.push((cl, items));
-        }
+        let ids: Vec<String> = cls.iter().map(|c| c.id.clone()).collect();
+        let mut items_by_cl = items_for_checklists(&db.conn, &ids)?;
+        let out = cls
+            .into_iter()
+            .map(|cl| {
+                let items = items_by_cl.remove(&cl.id).unwrap_or_default();
+                (cl, items)
+            })
+            .collect();
         Ok(out)
     }
 
@@ -210,6 +210,29 @@ impl Service {
         });
         Ok(())
     }
+}
+
+/// Load all items of the given checklists in ONE query, grouped by checklist_id.
+pub(crate) fn items_for_checklists(
+    conn: &rusqlite::Connection,
+    checklist_ids: &[String],
+) -> Result<HashMap<String, Vec<ChecklistItem>>> {
+    let mut map: HashMap<String, Vec<ChecklistItem>> = HashMap::new();
+    if checklist_ids.is_empty() {
+        return Ok(map);
+    }
+    let placeholders = checklist_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT * FROM checklist_items WHERE checklist_id IN ({placeholders}) ORDER BY checklist_id, position"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let ids: Vec<&str> = checklist_ids.iter().map(|s| s.as_str()).collect();
+    let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_checklist_item)?;
+    for r in rows {
+        let it: ChecklistItem = r?;
+        map.entry(it.checklist_id.clone()).or_default().push(it);
+    }
+    Ok(map)
 }
 
 trait NonEmpty {

@@ -37,16 +37,19 @@ export const api = {
   deleteBoard: (id) => api.del(`/api/v1/boards/${id}`),
   deleteAllBoards: () => api.del('/api/v1/boards'),
   duplicateBoard: (id) => api.post(`/api/v1/boards/${id}/duplicate`),
-  boardActivity: (id, limit = 60) => api.get(`/api/v1/boards/${id}/activity?limit=${limit}`),
+  boardActivity: (id, limit = 60, cardId) =>
+    api.get(`/api/v1/boards/${id}/activity?limit=${limit}${cardId ? `&card_id=${cardId}` : ''}`),
 
   lists: (boardId) => api.get(`/api/v1/boards/${boardId}/lists`),
   createList: (boardId, l) => api.post(`/api/v1/boards/${boardId}/lists`, l),
+  duplicateList: (id) => api.post(`/api/v1/lists/${id}/duplicate`),
   updateList: (id, p) => api.patch(`/api/v1/lists/${id}`, p),
   deleteList: (id) => api.del(`/api/v1/lists/${id}`),
 
   cards: (boardId, includeArchived = false) =>
     api.get(`/api/v1/boards/${boardId}/cards?include_archived=${includeArchived}`),
   card: (id) => api.get(`/api/v1/cards/${id}`),
+  cardsMeta: (boardId) => api.get(`/api/v1/boards/${boardId}/cards/meta`),
   createCard: (boardId, c) => api.post(`/api/v1/boards/${boardId}/cards`, c),
   updateCard: (id, p) => api.patch(`/api/v1/cards/${id}`, p),
   deleteCard: (id) => api.del(`/api/v1/cards/${id}`),
@@ -56,6 +59,7 @@ export const api = {
   instantiateTemplate: (id, p) => api.post(`/api/v1/cards/${id}/instantiate`, p),
   boardTemplates: (boardId) => api.get(`/api/v1/boards/${boardId}/templates`),
   setCardLabels: (id, labelIds) => api.put(`/api/v1/cards/${id}/labels`, labelIds),
+  attachLabel: (id, labelId) => api.post(`/api/v1/cards/${id}/labels/${labelId}`),
   setCover: (id, color) => api.post(`/api/v1/cards/${id}/cover`, { color }),
   setFieldValue: (cardId, fieldId, value) => api.put(`/api/v1/cards/${cardId}/fields/${fieldId}`, { value }),
 
@@ -112,6 +116,11 @@ export const api = {
   createCalendar: (c) => api.post('/api/v1/calendars', c),
   updateCalendar: (id, p) => api.patch(`/api/v1/calendars/${id}`, p),
   deleteCalendar: (id) => api.del(`/api/v1/calendars/${id}`),
+
+  backupSettings: () => api.get('/api/v1/settings/backup'),
+  saveBackupSettings: (s) => api.put('/api/v1/settings/backup', s),
+  runBackup: () => api.post('/api/v1/settings/backup/run'),
+  pickBackupDir: () => api.post('/api/v1/settings/backup/pick'),
 
   search: (q, boardId) =>
     api.get(`/api/v1/search?q=${encodeURIComponent(q)}${boardId ? `&board_id=${boardId}` : ''}`),

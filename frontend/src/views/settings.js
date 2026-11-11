@@ -525,6 +525,46 @@ export function renderSettings() {
         <div id="st-ai"><span class="muted">Vérification de la disponibilité…</span></div>
       </div>
 
+      <div class="panel">
+        <h3 style="display:flex;align-items:center;gap:8px">
+          ${icon('import', { size: 16, className: 'muted' })}
+          <span>Sauvegardes automatiques</span>
+        </h3>
+        <p class="muted" style="margin:0 0 12px;font-size:12.5px">
+          Copie compacte et cohérente de toute la base (boards, cartes, listes, labels…) dans un répertoire de votre choix.
+          Rotation automatique : au-delà du nombre conservé, les plus anciennes sont supprimées.
+          Répertoire vide = sauvegardes automatiques désactivées.
+        </p>
+        <div class="field">
+          <label>Répertoire de destination <span id="st-backup-dir-hint" class="muted" style="font-size:11.5px">(saisie manuelle — le sélecteur natif est disponible dans l'app Krello)</span></label>
+          <div class="row" style="gap:8px">
+            <input class="input" id="st-backup-dir" placeholder="/Users/moi/Sauvegardes/krello" style="flex:1" />
+            <button class="btn ghost sm" id="st-backup-browse" style="flex:none;display:none">📁 Parcourir…</button>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <div class="field" style="flex:1">
+            <label>Intervalle</label>
+            <select class="input" id="st-backup-interval">
+              <option value="1">Toutes les heures</option>
+              <option value="6">Toutes les 6 h</option>
+              <option value="12">Toutes les 12 h</option>
+              <option value="24">Une fois par jour</option>
+              <option value="168">Une fois par semaine</option>
+            </select>
+          </div>
+          <div class="field" style="flex:1">
+            <label>Copies conservées</label>
+            <input type="number" min="1" max="100" class="input" id="st-backup-keep" />
+          </div>
+        </div>
+        <div class="row" style="gap:8px;margin-top:10px">
+          <button class="btn primary sm" id="st-backup-save">Enregistrer</button>
+          <button class="btn ghost sm" id="st-backup-run">Sauvegarder maintenant</button>
+        </div>
+        <div id="st-backup-status" style="margin-top:8px"><span class="muted">…</span></div>
+      </div>
+
       <div class="panel" style="border:1px solid var(--error)">
         <h3 style="display:flex;align-items:center;gap:8px;color:var(--error)">
           ${icon('alert', { size: 16 })}
@@ -656,6 +696,67 @@ export function renderSettings() {
     host.querySelector('#st-ai').innerHTML = s.available
       ? `<span class="badge done">● Disponible</span> <p class="muted" style="margin:8px 0 0;font-size:12.5px">Moteur Apple Intelligence actif (${s.backend}). 100 % on-device — aucune donnée ne quitte votre appareil.</p>`
       : `<span class="badge overdue">● Indisponible</span> <p class="muted" style="margin:8px 0 0;font-size:12.5px">${s.reason || ''} — Nécessite macOS 15.1+ sur Mac Apple Silicon avec Apple Intelligence activée dans Réglages Système.</p>`;
+  });
+
+  // --- Sauvegardes automatiques
+  const stBackupStatus = host.querySelector('#st-backup-status');
+  const stBackupDir = host.querySelector('#st-backup-dir');
+  const stBackupInterval = host.querySelector('#st-backup-interval');
+  const stBackupKeep = host.querySelector('#st-backup-keep');
+  const stBackupBrowse = host.querySelector('#st-backup-browse');
+  const stBackupDirHint = host.querySelector('#st-backup-dir-hint');
+  // Sélecteur natif (Finder/Explorer) : ouvert par le serveur in-process via
+  // rfd — disponible uniquement dans la fenêtre Krello, pas dans un navigateur.
+  const inNativeApp = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
+  if (inNativeApp && stBackupBrowse) {
+    stBackupBrowse.style.display = '';
+    if (stBackupDirHint) stBackupDirHint.textContent = '(cliquez sur Parcourir… pour choisir un dossier natif)';
+    stBackupBrowse.addEventListener('click', async () => {
+      stBackupBrowse.disabled = true;
+      try {
+        const r = await api.pickBackupDir();
+        if (r.dir) {
+          stBackupDir.value = r.dir;
+          toast('Répertoire sélectionné — pensez à Enregistrer', 'ok');
+        }
+      } catch (e) { toast(e.message, 'err'); }
+      finally { stBackupBrowse.disabled = false; }
+    });
+  }
+  const backupStatusHtml = (s) => s.last_backup_at
+    ? `<span class="badge done">● Dernière : ${escapeHtml(s.last_backup_at.slice(0, 16).replace('T', ' '))}</span> <span class="muted" style="font-size:12px">${escapeHtml(s.last_backup_file || '')}</span>`
+    : '<span class="muted">Aucune sauvegarde pour l\'instant.</span>';
+  api.backupSettings().then((s) => {
+    if (stBackupDir) stBackupDir.value = s.backup_dir || '';
+    if (stBackupInterval) stBackupInterval.value = String(s.interval_hours);
+    if (stBackupKeep) stBackupKeep.value = String(s.keep);
+    if (stBackupStatus) stBackupStatus.innerHTML = backupStatusHtml(s);
+  }).catch((e) => {
+    if (stBackupStatus) stBackupStatus.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+  });
+  host.querySelector('#st-backup-save')?.addEventListener('click', async () => {
+    try {
+      const s = await api.saveBackupSettings({
+        backup_dir: stBackupDir?.value ?? '',
+        interval_hours: Number(stBackupInterval?.value || 24),
+        keep: Number(stBackupKeep?.value || 10),
+      });
+      toast('Réglages de sauvegarde enregistrés', 'ok');
+      if (stBackupStatus) stBackupStatus.innerHTML = backupStatusHtml(s);
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  host.querySelector('#st-backup-run')?.addEventListener('click', async () => {
+    try {
+      await api.saveBackupSettings({
+        backup_dir: stBackupDir?.value ?? '',
+        interval_hours: Number(stBackupInterval?.value || 24),
+        keep: Number(stBackupKeep?.value || 10),
+      });
+      const r = await api.runBackup();
+      toast(`Sauvegarde créée (${Math.max(1, Math.round(r.size / 1024))} Ko)`, 'ok');
+      if (stBackupStatus) stBackupStatus.innerHTML =
+        `<span class="badge done">● Dernière : maintenant</span> <span class="muted" style="font-size:12px">${escapeHtml(r.file)}</span>`;
+    } catch (e) { toast(e.message, 'err'); }
   });
 
   // --- zone de danger globale : tout supprimer (disponible même sans board ouvert)

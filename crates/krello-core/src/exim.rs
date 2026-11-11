@@ -6,9 +6,8 @@ use crate::error::{Error, Result};
 use crate::models::*;
 use crate::time::parse_date;
 use crate::undo::{
-    insert_list_row, label_ids_for_card, query_board, row_card, row_checklist, row_checklist_item,
-    row_automation, row_calendar, row_dependency, row_field_def, row_label,
-    row_list, snapshot_card,
+    insert_list_row, query_board, row_card, row_checklist, row_automation, row_calendar,
+    row_dependency, row_field_def, row_label, row_list, snapshot_cards_bulk,
 };
 
 pub const EXPORT_FORMATS: [&str; 4] = ["json", "md", "csv", "ics"];
@@ -79,7 +78,6 @@ pub fn export_board(
 pub fn export_json(conn: &Connection, board_id: &str) -> Result<String> {
     let board = query_board(conn, board_id)?
         .ok_or_else(|| Error::NotFound(format!("board {board_id}")))?;
-    let mut card_payloads = Vec::new();
     let cards: Vec<Card> = {
         let mut stmt = conn.prepare("SELECT * FROM cards WHERE board_id=?1 ORDER BY position")?;
         let v = stmt
@@ -87,16 +85,20 @@ pub fn export_json(conn: &Connection, board_id: &str) -> Result<String> {
             .collect::<rusqlite::Result<_>>()?;
         v
     };
-    for c in &cards {
-        let snap = snapshot_card(conn, &c.id)?;
-        card_payloads.push(serde_json::json!({
-            "card": snap.card,
-            "label_ids": snap.label_ids,
-            "checklists": snap.checklists,
-            "comments": snap.comments,
-            "field_values": snap.field_values,
-        }));
-    }
+    // Bulk: un jeu fixe de requêtes (le format du dump est inchangé).
+    let card_ids: Vec<String> = cards.iter().map(|c| c.id.clone()).collect();
+    let card_payloads: Vec<serde_json::Value> = snapshot_cards_bulk(conn, &card_ids)?
+        .into_iter()
+        .map(|snap| {
+            serde_json::json!({
+                "card": snap.card,
+                "label_ids": snap.label_ids,
+                "checklists": snap.checklists,
+                "comments": snap.comments,
+                "field_values": snap.field_values,
+            })
+        })
+        .collect();
     let lists: Vec<List> = {
         let mut stmt = conn.prepare("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
         let v = stmt
@@ -154,12 +156,15 @@ pub fn export_json(conn: &Connection, board_id: &str) -> Result<String> {
 }
 
 fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
+    use std::collections::HashMap;
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", board.title));
     if !board.description.is_empty() {
         out.push_str(&board.description);
         out.push_str("\n\n");
     }
+
+    // Bulk-load in a fixed number of queries: no per-row prepare/queries.
     let lists: Vec<List> = {
         let mut stmt = conn.prepare(
             "SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position",
@@ -169,29 +174,72 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
             .collect::<rusqlite::Result<_>>()?;
         v
     };
-    for l in lists {
+    let mut cards_by_list: HashMap<String, Vec<Card>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT * FROM cards WHERE board_id=?1 AND archived=0 AND is_template=0 ORDER BY list_id, position",
+        )?;
+        for r in stmt.query_map([&board.id], row_card)? {
+            let c: Card = r?;
+            cards_by_list.entry(c.list_id.clone()).or_default().push(c);
+        }
+    }
+    let mut label_names: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt =
+            conn.prepare("SELECT id, COALESCE(NULLIF(name, ''), color) FROM labels WHERE board_id=?1")?;
+        for r in stmt.query_map([&board.id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (id, name) = r?;
+            label_names.insert(id, name);
+        }
+    }
+    let mut label_ids_by_card: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT cl.card_id, cl.label_id FROM card_labels cl
+             JOIN cards cd ON cd.id = cl.card_id
+             WHERE cd.board_id=?1 AND cd.archived=0",
+        )?;
+        for r in stmt.query_map([&board.id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (cid, lid) = r?;
+            label_ids_by_card.entry(cid).or_default().push(lid);
+        }
+    }
+    let mut checklists_by_card: HashMap<String, Vec<Checklist>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT ch.* FROM checklists ch
+             JOIN cards cd ON cd.id = ch.card_id
+             WHERE cd.board_id=?1 AND cd.archived=0
+             ORDER BY ch.card_id, ch.position",
+        )?;
+        for r in stmt.query_map([&board.id], row_checklist)? {
+            let cl: Checklist = r?;
+            checklists_by_card.entry(cl.card_id.clone()).or_default().push(cl);
+        }
+    }
+    let cl_ids: Vec<String> = checklists_by_card
+        .values()
+        .flatten()
+        .map(|c| c.id.clone())
+        .collect();
+    let items_by_cl = crate::service::checklists::items_for_checklists(conn, &cl_ids)?;
+
+    for l in &lists {
         out.push_str(&format!("\n## {}\n\n", l.title));
-        let cards: Vec<Card> = {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM cards WHERE list_id=?1 AND archived=0 ORDER BY position",
-            )?;
-            let v = stmt
-                .query_map([&l.id], row_card)?
-                .collect::<rusqlite::Result<_>>()?;
-            v
+        let Some(cards) = cards_by_list.get(&l.id) else {
+            continue;
         };
         for c in cards {
             let mut meta = Vec::new();
-            let lids = label_ids_for_card(conn, &c.id)?;
-            if !lids.is_empty() {
-                let names: Vec<String> = lids
+            if let Some(lids) = label_ids_by_card.get(&c.id) {
+                let names: Vec<&str> = lids
                     .iter()
-                    .filter_map(|id| {
-                        conn.query_row("SELECT name FROM labels WHERE id=?1", [id], |r| {
-                            r.get::<_, String>(0)
-                        })
-                        .ok()
-                    })
+                    .filter_map(|id| label_names.get(id).map(|s| s.as_str()))
                     .filter(|n| !n.is_empty())
                     .collect();
                 if !names.is_empty() {
@@ -226,33 +274,18 @@ fn export_markdown(conn: &Connection, board: &Board) -> Result<String> {
                     out.push_str(&format!("    {line}\n"));
                 }
             }
-            let mut stmt =
-                conn.prepare("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
-            let cls: Vec<Checklist> = {
-                let v = stmt
-                    .query_map([&c.id], row_checklist)?
-                    .collect::<rusqlite::Result<_>>()?;
-                v
-            };
-            drop(stmt);
-            for cl in cls {
-                out.push_str(&format!("    - {}/\n", cl.title));
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
-                )?;
-                let items: Vec<ChecklistItem> = {
-                    let v = stmt
-                        .query_map([&cl.id], row_checklist_item)?
-                        .collect::<rusqlite::Result<_>>()?;
-                    v
-                };
-                drop(stmt);
-                for it in items {
-                    out.push_str(&format!(
-                        "        - [{}] {}\n",
-                        if it.checked { "x" } else { " " },
-                        it.title
-                    ));
+            if let Some(cls) = checklists_by_card.get(&c.id) {
+                for cl in cls {
+                    out.push_str(&format!("    - {}/\n", cl.title));
+                    if let Some(items) = items_by_cl.get(&cl.id) {
+                        for it in items {
+                            out.push_str(&format!(
+                                "        - [{}] {}\n",
+                                if it.checked { "x" } else { " " },
+                                it.title
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -268,16 +301,33 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
+/// One CSV row: (card_id, title, list, priority, start, due, pct, duration, work, wbs, milestone, desc).
+type CsvRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<f64>,
+    Option<f64>,
+    String,
+    bool,
+    String,
+);
+
 fn export_csv(conn: &Connection, board: &Board) -> Result<String> {
     let mut out = String::from(
         "titre;liste;labels;priorite;debut;echeance;pct;duration_j;work_h;wbs;jalon;description\n",
     );
-    let rows: Vec<(String, String, String, Option<String>, Option<String>, i64, Option<f64>, Option<f64>, String, bool, String)> = {
+    // card id first: labels resolve by card_id, never by title (not unique).
+    let rows: Vec<CsvRow> = {
         let mut stmt = conn.prepare(
-            "SELECT c.title, l.title, c.priority, c.start, c.due, c.pct_complete,
+            "SELECT c.id, c.title, l.title, c.priority, c.start, c.due, c.pct_complete,
                     c.duration_days, c.work_hours, c.wbs, c.is_milestone, c.description
              FROM cards c JOIN lists l ON l.id = c.list_id
-             WHERE c.board_id=?1 AND c.archived=0
+             WHERE c.board_id=?1 AND c.archived=0 AND c.is_template=0
              ORDER BY l.position, c.position",
         )?;
         let v = stmt
@@ -294,24 +344,18 @@ fn export_csv(conn: &Connection, board: &Board) -> Result<String> {
                     r.get(8)?,
                     r.get(9)?,
                     r.get(10)?,
+                    r.get(11)?,
                 ))
             })?
             .collect::<rusqlite::Result<_>>()?;
         v
     };
-    for (title, list, priority, start, due, pct, dur, work, wbs, milestone, desc) in rows {
-        let labels = {
-            let mut stmt = conn.prepare(
-                "SELECT group_concat(COALESCE(NULLIF(name,''), color), ', ')
-                 FROM labels WHERE id IN (SELECT label_id FROM card_labels WHERE card_id IN
-                 (SELECT id FROM cards WHERE board_id=?1 AND title=?2 LIMIT 1))",
-            )?;
-            let v: Option<String> = stmt
-                .query_row(params![board.id, title], |r| r.get(0))
-                .optional()?
-                .flatten();
-            v.unwrap_or_default()
-        };
+    let mut label_stmt = conn.prepare(
+        "SELECT COALESCE(group_concat(COALESCE(NULLIF(name,''), color), ', '), '')
+         FROM labels WHERE id IN (SELECT label_id FROM card_labels WHERE card_id=?1)",
+    )?;
+    for (card_id, title, list, priority, start, due, pct, dur, work, wbs, milestone, desc) in rows {
+        let labels: String = label_stmt.query_row([&card_id], |r| r.get(0))?;
         out.push_str(&format!(
             "{};{};{};{};{};{};{};{};{};{};{};{}\n",
             csv_escape(&title),
@@ -351,16 +395,26 @@ fn export_ics(conn: &Connection, board: &Board) -> Result<String> {
     for c in cards {
         let due = c.due.as_ref().unwrap();
         let has_time = crate::time::parse_dt(due).is_some() && !crate::time::is_date_only(due);
-        let dtstart = if has_time {
+        // RFC 5545: DTEND est obligatoire pour les clients stricts. Une date
+        // sans heure = journée entière (DTEND exclusif = lendemain) ; une
+        // échéance horodatée est un instant (DTEND = DTSTART).
+        let (dtstart, dtend) = if has_time {
             let dt = crate::time::parse_dt(due).unwrap();
-            format!("DTSTART:{}\r\n", dt.format("%Y%m%dT%H%M%S"))
+            (
+                format!("DTSTART:{}\r\n", dt.format("%Y%m%dT%H%M%S")),
+                format!("DTEND:{}\r\n", dt.format("%Y%m%dT%H%M%S")),
+            )
         } else {
             let d = parse_date(due).unwrap_or_else(crate::time::today);
-            format!("DTSTART;VALUE=DATE:{}\r\n", d.format("%Y%m%d"))
+            (
+                format!("DTSTART;VALUE=DATE:{}\r\n", d.format("%Y%m%d")),
+                format!("DTEND;VALUE=DATE:{}\r\n", crate::time::add_days(d, 1).format("%Y%m%d")),
+            )
         };
         out.push_str("BEGIN:VEVENT\r\n");
         out.push_str(&format!("UID:{}@krello.local\r\n", c.id));
         out.push_str(&dtstart);
+        out.push_str(&dtend);
         out.push_str(&format!("SUMMARY:{}\r\n", ics_escape(&c.title)));
         if !c.description.is_empty() {
             out.push_str(&format!("DESCRIPTION:{}\r\n", ics_escape(&c.description)));
@@ -383,7 +437,7 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
     let board: Board = serde_json::from_value(doc.get("board").cloned().unwrap_or_default())
         .map_err(|e| Error::Validation(format!("board invalide: {e}")))?;
 
-    let (new_board, _id_maps) = create_board_shell(service, &board.title, Some(board.background.clone()), board.calendar_id.clone(), board.start_date.clone(), board.deadline.clone())?;
+    let new_board = create_board_shell(service, &board.title, Some(board.background.clone()), board.calendar_id.clone(), board.start_date.clone(), board.deadline.clone())?;
 
     let mut list_map: std::collections::HashMap<String, String> = Default::default();
     let mut card_map: std::collections::HashMap<String, String> = Default::default();
@@ -548,7 +602,6 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
             }
         }
     }
-    drop_map(&label_map);
     crate::scheduler::recompute_service(service, &new_board.id)?;
     service.emit(crate::events::Event::BoardCreated {
         board_id: new_board.id.clone(),
@@ -604,10 +657,6 @@ fn remap_ref(
     }
 }
 
-fn drop_map<T>(m: &std::collections::HashMap<String, T>) {
-    let _ = m;
-}
-
 /// Import a Trello board export (boards/*.json from Trello).
 pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Board> {
     let doc: serde_json::Value =
@@ -618,7 +667,7 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
         .ok_or_else(|| Error::Validation("champ 'name' manquant".into()))?
         .to_string();
 
-    let (new_board, _id_maps) = create_board_shell(service, &title, None, None, None, None)?;
+    let new_board = create_board_shell(service, &title, None, None, None, None)?;
 
     let mut list_map: std::collections::HashMap<String, String> = Default::default();
     let mut label_map: std::collections::HashMap<String, String> = Default::default();
@@ -766,6 +815,9 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                     due,
                     due_complete,
                     reminder: None,
+                    reminder_sent_at: None,
+                    time_spent_minutes: 0,
+                    tracking_started_at: None,
                     recurrence: None,
                     priority: "none".into(),
                     is_milestone: false,
@@ -913,7 +965,7 @@ fn create_board_shell(
     calendar_id: Option<String>,
     start_date: Option<String>,
     deadline: Option<String>,
-) -> Result<(Board, ())> {
+) -> Result<Board> {
     let now = crate::time::now_rfc3339();
     let board = Board {
         id: crate::ids::new_id("board"),
@@ -932,5 +984,5 @@ fn create_board_shell(
         let db = service.lock_db()?;
         crate::undo::insert_board_row(&db.conn, &board)?;
     }
-    Ok((board, ()))
+    Ok(board)
 }

@@ -81,6 +81,20 @@ impl Db {
                 [],
             )?;
         }
+        if version < 4 {
+            self.conn.execute_batch(include_str!("../migrations/004_reminders.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '4')",
+                [],
+            )?;
+        }
+        if version < 5 {
+            self.conn.execute_batch(include_str!("../migrations/005_time_tracking.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '5')",
+                [],
+            )?;
+        }
 
         // Ensure the default calendar exists.
         self.conn.execute(

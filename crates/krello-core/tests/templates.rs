@@ -13,7 +13,9 @@ fn toggle(s: &Service, id: &str, on: bool) -> Card {
 }
 
 /// (titre checklist, [(titre item, coché, due)]) d'une carte.
-fn checklists_of(s: &Service, card_id: &str) -> Vec<(String, Vec<(String, bool, Option<String>)>)> {
+type ChecklistSummary = Vec<(String, Vec<(String, bool, Option<String>)>)>;
+
+fn checklists_of(s: &Service, card_id: &str) -> ChecklistSummary {
     let d = s.card_detail(card_id).unwrap();
     d["checklists"]
         .as_array()

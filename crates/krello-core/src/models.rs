@@ -64,6 +64,9 @@ pub struct Card {
     pub due_complete: bool,
     /// "15m"|"1h"|"1d"|"2d" or ISO datetime
     pub reminder: Option<String>,
+    /// When the reminder was last fired (NULL = armed). Reset when due/reminder changes.
+    #[serde(default)]
+    pub reminder_sent_at: Option<String>,
     /// JSON recurrence {"freq":"daily|weekly|monthly","interval":n,"until":"date"}
     pub recurrence: Option<String>,
     #[serde(default)]
@@ -92,6 +95,12 @@ pub struct Card {
     pub created_at: String,
     pub updated_at: String,
     pub completed_at: Option<String>,
+    /// Tracked work in minutes (F13 time tracking).
+    #[serde(default)]
+    pub time_spent_minutes: i64,
+    /// Running tracking session start (NULL = stopped).
+    #[serde(default)]
+    pub tracking_started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,6 +373,10 @@ pub struct UpdateCard {
     pub constraint_date: Option<String>,
     pub cost: Option<f64>,
     pub archived: Option<bool>,
+    /// Tracked work in minutes (minutes added, not replaced).
+    pub time_spent_minutes: Option<i64>,
+    /// Running tracking session start (None = no change; "" = stop).
+    pub tracking_started_at: Option<String>,
 }
 
 /// Sections of a template copied when instantiating a card

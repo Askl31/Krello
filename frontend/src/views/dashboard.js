@@ -127,7 +127,10 @@ export function renderDashboard() {
     }));
     blHost.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:4px 6px">Nom</th><th style="text-align:left;padding:4px 6px">Date</th><th style="text-align:left;padding:4px 6px">Dérive</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
     blHost.querySelectorAll('[data-del-bl]').forEach((b) => {
-      b.onclick = async () => { await api.deleteBaseline(b.dataset.delBl); renderDashboard(); };
+      b.onclick = async () => {
+        try { await api.deleteBaseline(b.dataset.delBl); renderDashboard(); }
+        catch (e) { toast(e.message, 'err'); }
+      };
     });
   }).catch(() => { blHost.innerHTML = '<span class="muted">—</span>'; });
 
@@ -135,9 +138,11 @@ export function renderDashboard() {
     const { promptDialog } = await import('../ui/modal.js');
     const name = await promptDialog('Nom de la baseline', `Semaine ${new Date().toISOString().slice(0, 10)}`);
     if (!name) return;
-    await api.createBaseline(state.board.id, name);
-    toast('Baseline enregistrée', 'ok');
-    renderDashboard();
+    try {
+      await api.createBaseline(state.board.id, name);
+      toast('Baseline enregistrée', 'ok');
+      renderDashboard();
+    } catch (e) { toast(e.message, 'err'); }
   };
 
   host.querySelector('#dash-ai-sum')?.addEventListener('click', async () => {

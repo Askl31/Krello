@@ -65,13 +65,13 @@ async function onAction(e) {
       if (!goal) return;
       out.textContent = 'Planification en cours par Apple Intelligence…';
       const r = await api.aiPlan(goal, board.id, firstList.id, true);
-      out.innerHTML = `✅ <b>${r.cards.length}</b> tâches créées, <b>${r.dependencies.length}</b> dépendances CPM.<br/>Fin estimée : <b>${r.schedule.finish}</b>`;
+      out.innerHTML = `✅ <b>${r.cards.length}</b> tâches créées, <b>${r.dependencies.length}</b> dépendances CPM.<br/>Fin estimée : <b>${escapeHtml(r.schedule.finish || '')}</b>`;
       await loadBoard(board.id);
     } else if (act === 'prio') {
       out.textContent = 'Analyse des priorités en cours…';
       const r = await api.aiPriorities(board.id, false);
       out.innerHTML = `<b>Suggestions d'optimisation :</b><br>` + r.suggestions
-        .map((s) => `• <b>${s.priority.toUpperCase()}</b> : ${escapeHtml(s.reason)}`).join('<br>')
+        .map((s) => `• <b>${escapeHtml((s.priority || '').toUpperCase())}</b> : ${escapeHtml(s.reason)}`).join('<br>')
         + `<div style="margin-top:10px"><button class="btn sm primary" data-act="prio-apply">Appliquer à tout le board</button></div>`;
     } else if (act === 'prio-apply') {
       const r = await api.aiPriorities(board.id, true);

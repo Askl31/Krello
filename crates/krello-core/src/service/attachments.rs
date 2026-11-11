@@ -69,6 +69,10 @@ impl Service {
                 card_id: card_id.to_string(),
             });
         }
+        self.push_undo(UndoEntry {
+            label: format!("Ajout de la pièce jointe « {} »", att.filename),
+            actions: vec![UndoAction::AttachmentCreated(att.clone())],
+        });
         Ok(att)
     }
 
@@ -95,6 +99,10 @@ impl Service {
                 .map(|c| c.board_id)
                 .ok_or_else(|| Error::NotFound("card".into()))?
         };
+        self.push_undo(UndoEntry {
+            label: format!("Suppression de la pièce jointe « {} »", att.filename),
+            actions: vec![UndoAction::AttachmentDeleted(att.clone())],
+        });
         self.emit(Event::AttachmentsUpdated {
             board_id,
             card_id: att.card_id.clone(),
@@ -179,14 +187,22 @@ impl Service {
         Ok(())
     }
 
+    /// Resolve a stored_path to a canonical path, refusing anything outside
+    /// the attachments directory (path-traversal guard).
+    pub fn attachment_path_checked(&self, stored_path: &str) -> Result<PathBuf> {
+        let dir = self.attachments_dir.canonicalize()?;
+        let canonical =
+            PathBuf::from(stored_path).canonicalize().map_err(|_| Error::NotFound("file".into()))?;
+        if !canonical.starts_with(&dir) {
+            return Err(Error::Validation(
+                "chemin hors répertoire des pièces jointes".into(),
+            ));
+        }
+        Ok(canonical)
+    }
+
     pub fn read_attachment_file(&self, stored_path: &str) -> Result<Vec<u8>> {
         // Only serve files inside the attachments directory.
-        let dir = self.attachments_dir.canonicalize()?;
-        let path = PathBuf::from(stored_path);
-        let canonical = path.canonicalize().map_err(|_| Error::NotFound("file".into()))?;
-        if !canonical.starts_with(&dir) {
-            return Err(Error::Validation("chemin hors répertoire des pièces jointes".into()));
-        }
-        Ok(std::fs::read(&canonical)?)
+        Ok(std::fs::read(self.attachment_path_checked(stored_path)?)?)
     }
 }

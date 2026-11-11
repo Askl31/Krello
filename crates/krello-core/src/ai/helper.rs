@@ -51,10 +51,11 @@ pub fn materialize_helper() -> Result<Option<PathBuf>> {
 }
 
 impl HelperSession {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
-            child: Mutex::new(None),
-        })
+    /// Infallible: the helper process is spawned per request, nothing can
+    /// fail at construction time (panicking here used to crash the server
+    /// on a corrupted environment).
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn ensure_child(&self, helper: &PathBuf) -> Result<(std::process::ChildStdin, BufReader<std::process::ChildStdout>)> {
@@ -161,6 +162,14 @@ impl Drop for HelperSession {
                 let _ = c.kill();
                 let _ = c.wait();
             }
+        }
+    }
+}
+
+impl Default for HelperSession {
+    fn default() -> Self {
+        Self {
+            child: Mutex::new(None),
         }
     }
 }

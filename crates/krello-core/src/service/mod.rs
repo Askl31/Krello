@@ -10,6 +10,7 @@ pub mod deps;
 pub mod fields;
 pub mod labels;
 pub mod lists;
+pub mod settings;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -20,7 +21,7 @@ use tokio::sync::broadcast;
 use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::events::Event;
-use crate::undo::{UndoEntry, UndoState, UNDO_CAP};
+use crate::undo::{UndoAction, UndoEntry, UndoState, UNDO_CAP};
 
 /// Thread-safe façade over SQLite. All mutations are transactional, emit events,
 /// and push declarative undo entries (capped stack, redo cleared on new edits).
@@ -83,6 +84,15 @@ impl Service {
             tx.commit()?;
         }
         let label = entry.label.clone();
+        // Side-effect filesystem après commit : une pièce jointe dont l'ajout
+        // vient d'être annulé n'a plus de ligne en DB → purger son fichier.
+        for a in &entry.actions {
+            if let UndoAction::AttachmentCreated(att) = a {
+                if let Ok(p) = self.attachment_path_checked(&att.stored_path) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
         if let Ok(mut st) = self.undo.lock() {
             st.redo.push(entry.clone());
         }
@@ -111,6 +121,15 @@ impl Service {
             tx.commit()?;
         }
         let label = entry.label.clone();
+        // Side-effect filesystem après commit : le redo d'une suppression de
+        // pièce jointe re-supprime aussi son fichier.
+        for a in &entry.actions {
+            if let UndoAction::AttachmentDeleted(att) = a {
+                if let Ok(p) = self.attachment_path_checked(&att.stored_path) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
         if let Ok(mut st) = self.undo.lock() {
             st.undo.push(entry.clone());
         }
@@ -162,8 +181,11 @@ impl Service {
 
     /// Public recompute entry point used by the HTTP API.
     pub fn recompute_and_notify_public(&self, board_id: &str) -> Result<crate::scheduler::ScheduleSummary> {
-        self.recompute_and_notify(board_id)?;
-        crate::scheduler::recompute_service(self, board_id)
+        let summary = crate::scheduler::recompute_service(self, board_id)?;
+        self.emit(Event::ScheduleUpdated {
+            board_id: board_id.to_string(),
+        });
+        Ok(summary)
     }
 
     /// Drop the whole undo/redo history (e.g. on import).

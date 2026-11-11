@@ -8,6 +8,8 @@ pub fn test_service() -> Service {
     Service::new(db, std::env::temp_dir().join(format!("krello-test-{}", std::process::id())))
 }
 
+// Utilisés par des suites de tests distinctes : clippy voit "unused" par crate de test.
+#[allow(dead_code)]
 pub fn board_with_list(s: &Service) -> (String, String) {
     let b = s
         .create_board(CreateBoard {
@@ -23,6 +25,7 @@ pub fn board_with_list(s: &Service) -> (String, String) {
     (b.id, l.id)
 }
 
+#[allow(dead_code)]
 pub fn make_card(s: &Service, list_id: &str, title: &str) -> Card {
     s.create_card(
         "unused",

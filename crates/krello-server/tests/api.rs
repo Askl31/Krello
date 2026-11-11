@@ -316,3 +316,230 @@ async fn delete_single_board_route_still_works() {
     let (status, _) = json_req(&app, "DELETE", "/api/v1/boards/board_nope", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn token_guard_rejects_api_and_ws_without_bearer() {
+    use krello_core::ai::provider::UnavailableProvider;
+    use krello_core::db::Db;
+    use krello_core::service::Service;
+    use krello_server::{build_router, make_state};
+    use std::sync::Arc;
+
+    let db = Db::open_memory().unwrap();
+    let service = Arc::new(Service::new(
+        db,
+        std::env::temp_dir().join(format!("krello-tok-test-{}", std::process::id())),
+    ));
+    let state = make_state(
+        service,
+        Some("secret".into()),
+        Some(Arc::new(UnavailableProvider { reason: "test".into() })),
+    );
+    let app = build_router(state);
+
+    // API sans token → 401
+    let (status, _) = json_req(&app, "GET", "/api/v1/boards", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // /health reste ouvert (sonde locale)
+    let (status, _) = json_req(&app, "GET", "/api/v1/health", None).await;
+    assert_eq!(status, StatusCode::OK);
+    // WebSocket sans token → 401 (le guard couvre le préfixe /api/v1)
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/ws")
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    // API avec le bon token → 200
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/boards")
+        .header("authorization", "Bearer secret")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn host_header_guard_rejects_foreign_host() {
+    let app = test_krello_app();
+    for (host, expected) in [
+        ("evil.example.com", StatusCode::FORBIDDEN),
+        ("evil.example.com:8787", StatusCode::FORBIDDEN),
+        ("127.0.0.1:8787", StatusCode::OK),
+        ("localhost", StatusCode::OK),
+        ("localhost:8787", StatusCode::OK),
+        ("[::1]:8787", StatusCode::OK),
+    ] {
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/health")
+ .header("host", host)
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), expected, "Host: {host}");
+    }
+    // Sans header Host (client CLI / test in-process) → autorisé.
+    let (status, _) = json_req(&app, "GET", "/api/v1/health", None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn unknown_api_route_returns_json_404_not_spa_html() {
+    use krello_server::fallback_handler;
+    let app = test_krello_app().fallback_service(axum::routing::any(fallback_handler));
+    let (status, body) = json_req(&app, "GET", "/api/v1/definitely-not-a-route", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"], "not_found");
+    // POST/PUT vers une route inconnue → 404 JSON également (le fallback est
+    // monté avec `any`, pas `get` — sinon axum renverrait un 405 trompeur).
+    let (status, body) = json_req(&app, "POST", "/api/v1/definitely-not-a-route", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "POST inconnu → 404, pas 405");
+    assert_eq!(body["error"], "not_found");
+    // Hors /api, le fallback sert bien le SPA (index.html embarqué).
+    let req = Request::builder()
+        .method("GET")
+        .uri("/b/quelque-chose")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(html.contains("<html"), "le fallback SPA doit servir index.html hors /api");
+}
+
+#[tokio::test]
+async fn cards_meta_endpoint_returns_counts_in_one_object() {
+    let app = test_krello_app();
+    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "Meta" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let board_id = board["id"].as_str().unwrap().to_string();
+    let (_, list) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "L" }))).await;
+    let list_id = list["id"].as_str().unwrap().to_string();
+    let (_, card) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/cards"), Some(serde_json::json!({ "title": "Carte méta", "list_id": list_id }))).await;
+    let card_id = card["id"].as_str().unwrap().to_string();
+
+    // 1 label, 1 checklist avec 2 items (1 coché), 1 commentaire.
+    let (_, label) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/labels"), Some(serde_json::json!({ "name": "bug", "color": "#f00" }))).await;
+    let label_id = label["id"].as_str().unwrap().to_string();
+    let (status, _) = json_req(&app, "PUT", &format!("/api/v1/cards/{card_id}/labels"), Some(serde_json::json!([label_id]))).await;
+    assert!(status == StatusCode::OK || status == StatusCode::NO_CONTENT, "PUT labels -> {status}");
+    let (_, cl) = json_req(&app, "POST", &format!("/api/v1/cards/{card_id}/checklists"), Some(serde_json::json!({ "title": "étapes" }))).await;
+    let cl_id = cl["id"].as_str().unwrap().to_string();
+    let (_, it1) = json_req(&app, "POST", &format!("/api/v1/checklists/{cl_id}/items"), Some(serde_json::json!({ "title": "un" }))).await;
+    let (_, _it2) = json_req(&app, "POST", &format!("/api/v1/checklists/{cl_id}/items"), Some(serde_json::json!({ "title": "deux" }))).await;
+    let it1_id = it1["id"].as_str().unwrap().to_string();
+    let (status, _) = json_req(&app, "PATCH", &format!("/api/v1/checklist-items/{it1_id}"), Some(serde_json::json!({ "checked": true }))).await;
+    assert!(status == StatusCode::OK || status == StatusCode::NO_CONTENT, "PATCH item -> {status}");
+    let (status, _) = json_req(&app, "POST", &format!("/api/v1/cards/{card_id}/comments"), Some(serde_json::json!({ "body": "hello" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, meta) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/cards/meta"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let m = &meta[card_id];
+    assert_eq!(m["label_ids"].as_array().unwrap().len(), 1);
+    assert_eq!(m["checklists_count"], 1);
+    assert_eq!(m["checklist_items"], 2);
+    assert_eq!(m["checklist_done"], 1);
+    assert_eq!(m["comments_count"], 1);
+    assert_eq!(m["attachments_count"], 0);
+    // Board inconnu → 404
+    let (status, _) = json_req(&app, "GET", "/api/v1/boards/board_nope/cards/meta", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn activity_and_runs_limits_are_bounded() {
+    let app = test_krello_app();
+    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "Limits" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let board_id = board["id"].as_str().unwrap().to_string();
+
+    // limit démesurée : le serveur doit répondre 200 sans tenter un fetch géant.
+    let (status, acts) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/activity?limit=999999999999"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(acts.is_array(), "flux d'activité attendu en tableau");
+    // limit nulle ou négative : clampée à 1 minimum, pas d'erreur.
+    let (status, _) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/activity?limit=0"), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn add_comment_rejects_missing_body_field() {
+    let app = test_krello_app();
+    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "C" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let board_id = board["id"].as_str().unwrap().to_string();
+    let (_, list) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "L" }))).await;
+    let list_id = list["id"].as_str().unwrap().to_string();
+    let (_, card) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/cards"), Some(serde_json::json!({ "title": "K", "list_id": list_id }))).await;
+    let card_id = card["id"].as_str().unwrap().to_string();
+
+    // Corps sans champ "body" → rejeté par la désérialisation typée (axum: 422).
+    let (status, _) = json_req(&app, "POST", &format!("/api/v1/cards/{card_id}/comments"), Some(serde_json::json!({}))).await;
+    assert!(status == StatusCode::BAD_REQUEST || status == StatusCode::UNPROCESSABLE_ENTITY, "corps invalide → {status}");
+    // Champ présent → 201.
+    let (status, _) = json_req(&app, "POST", &format!("/api/v1/cards/{card_id}/comments"), Some(serde_json::json!({ "body": "ok" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn backup_settings_and_run_flow() {
+    let app = test_krello_app();
+
+    // Défauts : pas de répertoire, intervalle 24 h, keep 10.
+    let (status, s) = json_req(&app, "GET", "/api/v1/settings/backup", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["backup_dir"], serde_json::Value::Null);
+    assert_eq!(s["interval_hours"], 24);
+    assert_eq!(s["keep"], 10);
+
+    // Run sans répertoire → 400 explicite.
+    let (status, body) = json_req(&app, "POST", "/api/v1/settings/backup/run", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["message"].as_str().unwrap().contains("répertoire"));
+
+    // PUT : répertoire valide (temp), intervalle borné.
+    let dir = std::env::temp_dir().join(format!("krello-backup-api-{}", std::process::id()));
+    let (status, s) = json_req(
+        &app,
+        "PUT",
+        "/api/v1/settings/backup",
+        Some(serde_json::json!({ "backup_dir": dir.to_string_lossy(), "interval_hours": 99999, "keep": 3 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["backup_dir"].as_str(), Some(dir.to_string_lossy().as_ref()));
+    assert_eq!(s["interval_hours"], 720, "intervalle borné à 24×30 h");
+    assert_eq!(s["keep"], 3);
+
+    // Run → fichier créé dans le répertoire.
+    let (status, r) = json_req(&app, "POST", "/api/v1/settings/backup/run", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let file = r["file"].as_str().unwrap();
+    assert!(std::path::Path::new(file).exists(), "fichier de backup présent");
+    assert!(r["size"].as_u64().unwrap() > 0);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn native_dir_picker_rejected_outside_tauri_app() {
+    // Le flag KRELLO_NATIVE_DIALOG n'est posé que par l'app Tauri (process
+    // partagé). En test / navigateur → erreur explicite, pas de fenêtre.
+    std::env::remove_var("KRELLO_NATIVE_DIALOG");
+    let app = test_krello_app();
+    let (status, body) = json_req(&app, "POST", "/api/v1/settings/backup/pick", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["message"].as_str().unwrap().contains("app Krello"),
+        "message attendu, reçu: {body}"
+    );
+}

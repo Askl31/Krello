@@ -2,6 +2,7 @@
 
 import { api } from './api.js';
 import { startWs, on, emit } from './ws.js';
+import { toast } from './ui/modal.js';
 import { state, applyTheme, applyStyle, applyBoardBackground, loadBoards, loadBoard, hydrateLabelIds } from './state.js';
 import { startRouter, boardUrl, navigate } from './router.js';
 import { initPalette } from './ui/palette.js';
@@ -63,7 +64,13 @@ async function renderRoute() {
         const allSettings = {};
         try {
           const views = await api.get(`/api/v1/boards/${boardId}/views`);
-          for (const v of views) allSettings[v.view] = JSON.parse(v.settings || '{}');
+          for (const v of views) {
+            // GET /views renvoie `settings` déjà parsé en objet (le TEXT est
+            // déserialisé côté serveur) — gérer aussi une string historique.
+            allSettings[v.view] = typeof v.settings === 'string'
+              ? JSON.parse(v.settings || '{}')
+              : (v.settings || {});
+          }
         } catch { /* optionnel */ }
         loadViewSettings(allSettings);
       } catch (e) {
@@ -108,6 +115,17 @@ async function renderRoute() {
             break;
           }
         }
+      }
+
+      // Lien profond vers une carte: #/b/{board}/{view}/c/{cardId}.
+      // On ouvre la modale puis on retire le segment carte du hash
+      // silencieusement (replaceState, sans déclencher le routeur).
+      const seg = route.split('/');
+      const deepCardId = seg[4] === 'c' ? seg[5] : null;
+      if (deepCardId) {
+        const { openCardModal } = await import('../components/card_modal.js');
+        openCardModal(deepCardId);
+        history.replaceState(null, '', location.pathname + location.search + `#/b/${boardId}/${view || 'board'}`);
       }
     } else if (route === '#/settings') {
       if (state.board) {
@@ -201,6 +219,23 @@ on('*', (evt) => {
     scheduleReload();
   }
 });
+
+// Rappels locaux : le sweep minute émet ReminderDue une seule fois par
+// carte/échéance (title/due voyagent avec l'événement, pas de refetch).
+on('ReminderDue', ({ title, due }) => {
+  const d = (due || '').slice(0, 16).replace('T', ' ');
+  toast(`🔔 Rappel — « ${title} » (échéance ${d})`, 'ai');
+});
+
+// Accessibilité : réplique title → aria-label sur les contrôles sans libellé
+// accessible (l'app génère beaucoup de boutons icônes via innerHTML).
+new MutationObserver(() => {
+  document.querySelectorAll('[title]:not([aria-label])').forEach((n) => {
+    if (n.matches('.iconbtn, button, [role="button"]') && !n.textContent.trim()) {
+      n.setAttribute('aria-label', n.getAttribute('title'));
+    }
+  });
+}).observe(document.body, { childList: true, subtree: true });
 
 emit('app.boot');
 startWs();

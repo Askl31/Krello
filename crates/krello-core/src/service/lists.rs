@@ -2,13 +2,14 @@
 
 
 
-use super::{next_list_position, now_updated, renormalize_lists, Service};
+use super::{log_activity, next_list_position, now_updated, renormalize_lists, Service};
 use crate::error::{Error, Result};
 use crate::events::Event;
 use crate::ids::new_id;
 use crate::models::*;
 use crate::time::now_rfc3339;
 use crate::undo::*;
+use rusqlite::params;
 
 impl Service {
     pub fn create_list(&self, board_id: &str, c: CreateList) -> Result<List> {
@@ -20,7 +21,7 @@ impl Service {
             id: new_id("list"),
             board_id: board_id.to_string(),
             title: c.title.trim().to_string(),
-            position: c.position.unwrap_or_else(|| 0.0), // fixed below
+            position: c.position.unwrap_or(0.0), // fixed below
             wip_limit: c.wip_limit,
             archived: false,
             created_at: now.clone(),
@@ -119,20 +120,15 @@ impl Service {
         let list =
             query_list(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("list {id}")))?;
         let board_id = list.board_id.clone();
-        let mut cards = Vec::new();
-        {
+        // Bulk: un jeu fixe de requêtes au lieu d'un snapshot par carte.
+        let ids: Vec<String> = {
             let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE list_id=?1")?;
-            let ids: Vec<String> = {
-                let v = stmt
-                    .query_map([id], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<_>>()?;
-                v
-            };
-            drop(stmt);
-            for cid in ids {
-                cards.push(snapshot_card(&db.conn, &cid)?);
-            }
-        }
+            let v = stmt
+                .query_map([id], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            v
+        };
+        let cards = snapshot_cards_bulk(&db.conn, &ids)?;
         let entry = UndoEntry {
             label: format!("Suppression de la liste « {} »", list.title),
             actions: vec![UndoAction::ListDeleted { list, cards }],
@@ -145,6 +141,137 @@ impl Service {
             list_id: id.to_string(),
         });
         Ok(())
+    }
+
+    /// Deep-copy a list (title + "(copie)", all non-archived cards with labels,
+    /// checklists, custom field values and attachments — attachment FILES are
+    /// physically duplicated so deletion of one list never breaks the other).
+    /// Dependencies are NOT copied. Undoable as one operation.
+    pub fn duplicate_list(&self, id: &str) -> Result<List> {
+        let db = self.lock_db()?;
+        let src =
+            query_list(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("list {id}")))?;
+
+        let new_list = List {
+            id: new_id("list"),
+            board_id: src.board_id.clone(),
+            title: format!("{} (copie)", src.title),
+            position: src.position + 0.5, // renormalisé juste après
+            wip_limit: src.wip_limit,
+            archived: false,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+        };
+        insert_list_row(&db.conn, &new_list)?;
+        renormalize_lists(&db.conn, &src.board_id)?;
+
+        // Snapshot bulk des cartes non-archivées (labels/checklists/champs/PJ inclus).
+        let ids: Vec<String> = {
+            let mut stmt = db
+                .conn
+                .prepare("SELECT id FROM cards WHERE list_id=?1 AND archived=0 ORDER BY position")?;
+            let v = stmt
+                .query_map([id], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            v
+        };
+        let snaps = snapshot_cards_bulk(&db.conn, &ids)?;
+
+        let mut actions = vec![UndoAction::ListCreated(new_list.clone())];
+        for (i, snap) in snaps.iter().enumerate() {
+            let mut card = snap.card.clone();
+            card.id = new_id("card");
+            card.list_id = new_list.id.clone();
+            card.position = i as f64;
+            card.completed_at = None;
+            card.reminder_sent_at = None;
+            card.created_at = now_rfc3339();
+            card.updated_at = now_rfc3339();
+            insert_card_row(&db.conn, &card)?;
+            actions.push(UndoAction::CardCreated(card.clone()));
+
+            for lid in &snap.label_ids {
+                db.conn.execute(
+                    "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+                    params![&card.id, lid],
+                )?;
+            }
+            for (cl, items) in &snap.checklists {
+                let ncl = Checklist {
+                    id: new_id("cl"),
+                    card_id: card.id.clone(),
+                    ..cl.clone()
+                };
+                insert_checklist_row(&db.conn, &ncl)?;
+                for it in items {
+                    insert_checklist_item_row(
+                        &db.conn,
+                        &ChecklistItem {
+                            id: new_id("cli"),
+                            checklist_id: ncl.id.clone(),
+                            ..it.clone()
+                        },
+                    )?;
+                }
+            }
+            for fv in &snap.field_values {
+                db.conn.execute(
+                    "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+                    params![&card.id, fv.field_id, fv.value],
+                )?;
+            }
+            // Les fichiers de pièces jointes sont physiquement dupliqués: deux
+            // lignes qui partageaient un même stored_path se briseraient l'une
+            // l'autre à la suppression (best-effort si le fichier manque).
+            for att in &snap.attachments {
+                let new_att_id = new_id("att");
+                let ext = std::path::Path::new(&att.stored_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| format!(".{e}"))
+                    .unwrap_or_default();
+                let new_name = format!("{new_att_id}{ext}");
+                let new_path = self.attachments_dir.join(&new_name);
+                if std::fs::copy(&att.stored_path, &new_path).is_err() {
+                    tracing::warn!(
+                        "duplicate_list: fichier source manquant pour la PJ {} ({})",
+                        att.id,
+                        att.stored_path
+                    );
+                }
+                let na = Attachment {
+                    id: new_att_id,
+                    card_id: card.id.clone(),
+                    filename: att.filename.clone(),
+                    stored_path: new_path.to_string_lossy().into_owned(),
+                    mime: att.mime.clone(),
+                    size: att.size,
+                    is_cover: att.is_cover,
+                    created_at: now_rfc3339(),
+                };
+                insert_attachment_row(&db.conn, &na)?;
+            }
+        }
+        log_activity(
+            &db.conn,
+            &src.board_id,
+            None,
+            "list_duplicated",
+            &serde_json::json!({ "source": src.id, "cards": snaps.len() }),
+        )?;
+        drop(db);
+
+        self.push_undo(UndoEntry {
+            label: format!("Duplication de la liste « {} »", src.title),
+            actions,
+        });
+        self.emit(Event::ListCreated {
+            board_id: src.board_id.clone(),
+            list_id: new_list.id.clone(),
+        });
+        // Le planning du board a changé (les copies ont des échéances).
+        self.recompute_and_notify(&src.board_id)?;
+        Ok(new_list)
     }
 
     /// Number of active (non-archived) cards in a list — used for WIP warnings.

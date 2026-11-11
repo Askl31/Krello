@@ -425,6 +425,79 @@ impl Service {
         Ok(())
     }
 
+    /// Resolve the moment a reminder should fire: an ISO datetime is absolute,
+    /// "15m"|"1h"|"1d"|"2d" means N before the due date (local time).
+    pub fn reminder_moment(reminder: &str, due: &str) -> Option<chrono::NaiveDateTime> {
+        if let Some(dt) = crate::time::parse_dt(reminder) {
+            return Some(dt);
+        }
+        let mins: i64 = if let Some(r) = reminder.trim().strip_suffix('m') {
+            r.parse().ok()?
+        } else if let Some(r) = reminder.trim().strip_suffix('h') {
+            r.parse::<i64>().ok()? * 60
+        } else if let Some(r) = reminder.trim().strip_suffix('d') {
+            r.parse::<i64>().ok()? * 60 * 24
+        } else {
+            return None;
+        };
+        let due_dt = crate::time::parse_dt(due)?;
+        Some(due_dt - chrono::Duration::minutes(mins))
+    }
+
+    /// Fire reminders whose moment is reached and not sent yet. One event per
+    /// card; `reminder_sent_at` (reset whenever due/reminder changes) prevents
+    /// duplicates. Archived cards, templates, done cards and cards without a
+    /// parseable due/reminder are ignored. Returns the number of events fired.
+    pub fn fire_due_reminders(&self) -> Result<usize> {
+        let now = chrono::Local::now().naive_local();
+        let db = self.lock_db()?;
+        let mut stmt = db.conn.prepare(
+            "SELECT id, board_id, title, due, reminder, reminder_sent_at FROM cards
+             WHERE reminder IS NOT NULL AND reminder != '' AND due IS NOT NULL
+               AND due_complete=0 AND archived=0 AND is_template=0",
+        )?;
+        let targets: Vec<(String, String, String, String, String, Option<String>)> = {
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        drop(stmt);
+        let mut fired = 0;
+        for (id, board_id, title, due, reminder, sent) in targets {
+            let Some(remind_at) = Self::reminder_moment(&reminder, &due) else {
+                continue;
+            };
+            if let Some(sent_at) = sent.as_deref().and_then(crate::time::parse_dt) {
+                if sent_at >= remind_at {
+                    continue; // déjà envoyé pour cette échéance
+                }
+            }
+            if now < remind_at {
+                continue; // pas encore l'heure
+            }
+            db.conn.execute(
+                "UPDATE cards SET reminder_sent_at=?2 WHERE id=?1",
+                params![id, crate::time::now_rfc3339()],
+            )?;
+            self.emit(Event::ReminderDue {
+                board_id,
+                card_id: id,
+                title,
+                due,
+            });
+            fired += 1;
+        }
+        Ok(fired)
+    }
+
     /// Apply a rule to a set of cards (button / scheduled triggers). Returns cards touched.
     fn execute_on_cards(
         &self,
@@ -510,7 +583,7 @@ impl Service {
     /// Scheduled triggers fire at most once per day per rule; due triggers once per
     /// day per card (dedupe via the `automation_runs` log).
     pub fn run_scheduled_sweep(&self) -> Result<usize> {
-        let mut total = 0;
+        let mut total = self.fire_due_reminders()?;
         let now_local = chrono::Local::now().naive_local();
         let t = today();
         let today_s = t.to_string();
@@ -987,6 +1060,9 @@ fn apply_action(
                 due: None,
                 due_complete: false,
                 reminder: None,
+                reminder_sent_at: None,
+                time_spent_minutes: 0,
+                tracking_started_at: None,
                 recurrence: None,
                 priority: card.priority.clone(),
                 is_milestone: false,
@@ -1130,6 +1206,9 @@ fn apply_action(
                 due: None,
                 due_complete: false,
                 reminder: None,
+                reminder_sent_at: None,
+                time_spent_minutes: 0,
+                tracking_started_at: None,
                 recurrence: None,
                 priority: priority.to_string(),
                 is_milestone: false,

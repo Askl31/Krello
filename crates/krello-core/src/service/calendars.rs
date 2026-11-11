@@ -52,6 +52,10 @@ impl Service {
                 params![cal.id, cal.name, cal.weekends, cal.holidays, cal.hours_per_day, cal.created_at],
             )?;
         }
+        self.push_undo(UndoEntry {
+            label: format!("Création du calendrier « {} »", cal.name),
+            actions: vec![UndoAction::CalendarCreated(cal.clone())],
+        });
         self.emit(Event::CalendarsUpdated {
             calendar_id: cal.id.clone(),
         });
@@ -83,6 +87,13 @@ impl Service {
             params![after.id, after.name, after.weekends, after.holidays, after.hours_per_day],
         )?;
         drop(db);
+        self.push_undo(UndoEntry {
+            label: format!("Modification du calendrier « {} »", before.name),
+            actions: vec![UndoAction::CalendarUpdated {
+                before,
+                after: after.clone(),
+            }],
+        });
         self.emit(Event::CalendarsUpdated {
             calendar_id: after.id.clone(),
         });
@@ -94,11 +105,26 @@ impl Service {
             return Err(Error::Validation("le calendrier par défaut ne peut pas être supprimé".into()));
         }
         let db = self.lock_db()?;
+        let cal = db
+            .conn
+            .query_row("SELECT * FROM calendars WHERE id=?1", [id], row_calendar)
+            .optional()?
+            .ok_or_else(|| Error::NotFound(format!("calendar {id}")))?;
+        // Boards impactés (leur planning basculera sur le calendrier par défaut).
+        let board_ids: Vec<String> = {
+            let mut stmt = db.conn.prepare("SELECT id FROM boards WHERE calendar_id=?1")?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
         let n = db.conn.execute("DELETE FROM calendars WHERE id=?1", [id])?;
         if n == 0 {
             return Err(Error::NotFound(format!("calendar {id}")));
         }
         drop(db);
+        self.push_undo(UndoEntry {
+            label: format!("Suppression du calendrier « {} »", cal.name),
+            actions: vec![UndoAction::CalendarDeleted { cal, board_ids }],
+        });
         self.emit(Event::CalendarsUpdated {
             calendar_id: id.to_string(),
         });

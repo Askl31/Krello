@@ -172,22 +172,22 @@ function deps_hasLabel(card, labelId) {
   return (card._label_ids || []).includes(labelId);
 }
 
-/** Renseigne _label_ids sur chaque carte (une seule requête par board via détails). */
+/** Renseigne _label_ids + compteurs sur chaque carte via UN appel /cards/meta. */
 export async function hydrateLabelIds() {
-  // Le endpoint /cards ne renvoie pas les labels ; on récupère les paires via une
-  // requête par carte serait coûteux : on passe par card_detail seulement à l'ouverture.
-  // Pour le filtrage instantané, on marque les cartes via labels du board + detail cache.
   if (!state.board) return;
-  const details = await Promise.allSettled(state.cards.map((c) => api.card(c.id)));
-  state.cards.forEach((c, i) => {
-    const d = details[i];
-    if (d.status === 'fulfilled') {
-      c._label_ids = (d.value.labels || []).map((l) => l.id);
-      c._checklists = d.value.checklists || [];
-      c._comments_count = (d.value.comments || []).length;
-      c._attachments_count = (d.value.attachments || []).length;
+  try {
+    const meta = await api.cardsMeta(state.board.id);
+    for (const c of state.cards) {
+      const m = meta[c.id];
+      if (!m) continue;
+      c._label_ids = m.label_ids || [];
+      c._checklists_count = m.checklists_count || 0;
+      c._checklist_total = m.checklist_items || 0;
+      c._checklist_done = m.checklist_done || 0;
+      c._comments_count = m.comments_count || 0;
+      c._attachments_count = m.attachments_count || 0;
     }
-  });
+  } catch { /* métadonnées non hydratées : les tuiles restent fonctionnelles */ }
   emit('board.hydrated');
 }
 

@@ -12,6 +12,7 @@ export function toast(message, kind = '') {
   }
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
+  el.setAttribute('role', 'status');
   
   let ic = '';
   if (kind === 'ok') ic = icon('check', { size: 14, className: 'toast-icon' });
@@ -54,7 +55,21 @@ export function openModal(html, { onClose, id, size = 'md' } = {}) {
 
   backdrop.__krelloOnClose = onClose;
 
-  const close = () => {
+  // Accessibilité : dialog modal, libellé depuis le titre, focus piégé
+  // (Tab circulaire) et rendu au déclencheur à la fermeture.
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (!isUpdate) {
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('tabindex', '-1');
+  }
+  const syncAriaLabel = () => {
+    const h = modalEl.querySelector('h2, h3');
+    if (h) modalEl.setAttribute('aria-label', h.textContent.trim().slice(0, 120) || 'Boîte de dialogue');
+  };
+  syncAriaLabel();
+
+  let close = () => {
     backdrop.style.opacity = '0';
     backdrop.style.transition = 'opacity 0.18s ease';
     const modal = backdrop.querySelector('.modal');
@@ -64,9 +79,38 @@ export function openModal(html, { onClose, id, size = 'md' } = {}) {
     }
     setTimeout(() => {
       backdrop.remove();
+      // Rendu du focus au déclencheur s'il est encore dans le document.
+      if (opener && document.contains(opener)) opener.focus();
       backdrop.__krelloOnClose?.();
     }, 180);
   };
+
+  // Focus trap : Tab circulaire parmi les contrôles visibles de la modale.
+  const focusables = () =>
+    [...modalEl.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((n) => n.offsetParent !== null);
+  modalEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const nodes = focusables();
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+  // Focus initial : premier contrôle utile (pas le bouton fermer), sinon la modale.
+  if (!isUpdate) {
+    setTimeout(() => {
+      const first = focusables().find((n) => n.dataset.close === undefined) || focusables()[0];
+      (first || modalEl).focus();
+    }, 0);
+  }
 
   if (!isUpdate) {
     backdrop.addEventListener('pointerdown', (e) => {

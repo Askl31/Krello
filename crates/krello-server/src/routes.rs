@@ -1,10 +1,11 @@
 //! All REST routes.
 
-use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
+use tower::ServiceExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -27,6 +28,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/activity", get(board_activity))
         .route("/boards/{id}/lists", get(list_lists).post(create_list))
         .route("/boards/{id}/cards", get(list_cards).post(create_card))
+        .route("/boards/{id}/cards/meta", get(list_cards_meta))
         .route("/boards/{id}/templates", get(list_board_templates))
         .route("/boards/{id}/labels", get(list_labels).post(create_label))
         .route("/boards/{id}/fields", get(list_fields).post(create_field))
@@ -38,9 +40,14 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/export", get(export_board))
         .route("/boards/{id}/views/{view}", put(set_view_settings))
         .route("/boards/{id}/views", get(get_view_settings))
+        // settings / backup
+        .route("/settings/backup", get(get_backup_settings).put(put_backup_settings))
+        .route("/settings/backup/run", post(run_backup_now))
+        .route("/settings/backup/pick", post(pick_backup_dir))
         // lists
         .route("/lists/{id}", patch(update_list).delete(delete_list).get(get_list))
         .route("/lists/{id}/count", get(list_card_count))
+        .route("/lists/{id}/duplicate", post(duplicate_list_route))
         // cards
         .route("/cards/{id}", get(get_card).patch(update_card).delete(delete_card))
         .route("/cards/{id}/move", post(move_card))
@@ -182,12 +189,20 @@ async fn duplicate_board(State(state): State<SharedState>, Path(id): Path<String
     Ok((StatusCode::CREATED, Json(board)).into_response())
 }
 
+/// Bound a client-provided page limit (1..=500, fallback to `default`).
+fn clamp_limit(v: Option<i64>, default: i64) -> i64 {
+    v.unwrap_or(default).clamp(1, 500)
+}
+
 async fn board_activity(
     State(state): State<SharedState>,
     Path(id): Path<String>,
     Query(q): Query<ActivityQuery>,
 ) -> ApiResult<Response> {
-    let acts = state.service.board_activity(&id, q.limit.unwrap_or(100))?;
+    let acts = match &q.card_id {
+        Some(card_id) => state.service.card_activity(&id, card_id, clamp_limit(q.limit, 100))?,
+        None => state.service.board_activity(&id, clamp_limit(q.limit, 100))?,
+    };
     Ok(Json(acts).into_response())
 }
 
@@ -195,6 +210,7 @@ async fn board_activity(
 #[serde(default)]
 struct ActivityQuery {
     limit: Option<i64>,
+    card_id: Option<String>,
 }
 
 // ---------- lists ----------
@@ -239,6 +255,13 @@ async fn list_card_count(State(state): State<SharedState>, Path(id): Path<String
 async fn list_cards(State(state): State<SharedState>, Path(id): Path<String>, Query(q): Query<IncludeArchived>) -> ApiResult<Response> {
     let cards = state.service.list_cards(&id, q.include_archived.unwrap_or(false))?;
     Ok(Json(cards).into_response())
+}
+
+/// Per-card metadata (label ids + checklist/comment/attachment counts) for a
+/// whole board in a fixed number of queries — replaces N × GET /cards/{id}.
+async fn list_cards_meta(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
+    let meta = state.service.cards_meta(&id)?;
+    Ok(Json(meta).into_response())
 }
 
 async fn create_card(
@@ -426,9 +449,13 @@ async fn list_comments(State(state): State<SharedState>, Path(id): Path<String>)
     Ok(Json(comments).into_response())
 }
 
-async fn add_comment(State(state): State<SharedState>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult<Response> {
-    let text = body.get("body").and_then(|v| v.as_str()).unwrap_or_default();
-    let comment = state.service.add_comment(&id, text)?;
+#[derive(Deserialize)]
+struct CommentBody {
+    body: String,
+}
+
+async fn add_comment(State(state): State<SharedState>, Path(id): Path<String>, Json(body): Json<CommentBody>) -> ApiResult<Response> {
+    let comment = state.service.add_comment(&id, &body.body)?;
     Ok((StatusCode::CREATED, Json(comment)).into_response())
 }
 
@@ -465,17 +492,31 @@ async fn list_attachments(State(state): State<SharedState>, Path(id): Path<Strin
     Ok(Json(atts).into_response())
 }
 
-async fn download_attachment(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
+async fn download_attachment(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> ApiResult<Response> {
     let att = state.service.get_attachment(&id).map_err(ApiError)?;
-    let data = state.service.read_attachment_file(&att.stored_path).map_err(ApiError)?;
-    Ok((
-        [
-            ("Content-Type", att.mime.as_str()),
-            ("Content-Disposition", &format!("attachment; filename=\"{}\"", att.filename.replace('"', ""))),
-        ],
-        data,
-    )
-        .into_response())
+    let path = state.service.attachment_path_checked(&att.stored_path).map_err(ApiError)?;
+    // Stream the file (supports HTTP Range) instead of buffering up to 64 MiB.
+    let res = tower_http::services::ServeFile::new(path)
+        .oneshot(req)
+        .await
+        .map_err(|e| ApiError(krello_core::Error::NotFound(format!("fichier illisible: {e}"))))?;
+    let mut res = res.map(axum::body::Body::new);
+    let mime = axum::http::HeaderValue::from_str(&att.mime)
+        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("application/octet-stream"));
+    let disposition = format!(
+        "attachment; filename=\"{}\"",
+        att.filename.replace(['"', '\r', '\n', '\\'], "")
+    );
+    res.headers_mut().insert(axum::http::header::CONTENT_TYPE, mime);
+    if let Ok(v) = axum::http::HeaderValue::from_str(&disposition) {
+        res.headers_mut()
+            .insert(axum::http::header::CONTENT_DISPOSITION, v);
+    }
+    Ok(res)
 }
 
 async fn delete_attachment(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
@@ -528,8 +569,13 @@ async fn list_baselines(State(state): State<SharedState>, Path(id): Path<String>
     Ok(Json(baselines).into_response())
 }
 
-async fn create_baseline(State(state): State<SharedState>, Path(id): Path<String>, Json(body): Json<Value>) -> ApiResult<Response> {
-    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("baseline");
+#[derive(Deserialize)]
+struct BaselineBody {
+    name: Option<String>,
+}
+
+async fn create_baseline(State(state): State<SharedState>, Path(id): Path<String>, Json(body): Json<BaselineBody>) -> ApiResult<Response> {
+    let name = body.name.as_deref().unwrap_or("baseline");
     let baseline = state.service.create_baseline(&id, name)?;
     Ok((StatusCode::CREATED, Json(baseline)).into_response())
 }
@@ -576,7 +622,7 @@ async fn list_automation_runs(
     Path(id): Path<String>,
     Query(q): Query<RunsQuery>,
 ) -> ApiResult<Response> {
-    let runs = state.service.list_automation_runs(&id, q.limit.unwrap_or(50))?;
+    let runs = state.service.list_automation_runs(&id, clamp_limit(q.limit, 50))?;
     Ok(Json(runs).into_response())
 }
 
@@ -585,7 +631,7 @@ async fn list_board_automation_runs(
     Path(id): Path<String>,
     Query(q): Query<RunsQuery>,
 ) -> ApiResult<Response> {
-    let runs = state.service.list_board_automation_runs(&id, q.limit.unwrap_or(100))?;
+    let runs = state.service.list_board_automation_runs(&id, clamp_limit(q.limit, 100))?;
     Ok(Json(runs).into_response())
 }
 
@@ -838,10 +884,12 @@ async fn ai_priorities(State(state): State<SharedState>, Json(body): Json<Priori
     let suggestions = ai::suggest_priorities(state.ai.as_ref(), &arr).map_err(ApiError)?;
     if body.apply {
         for s in &suggestions {
-            let _ = state.service.update_card(
+            if let Err(e) = state.service.update_card(
                 &s.card_id,
                 UpdateCard { priority: Some(s.priority.clone()), ..Default::default() },
-            );
+            ) {
+                tracing::warn!("ai_priorities: apply carte {} échoué: {e}", s.card_id);
+            }
         }
     }
     Ok(ok_json(json!({ "suggestions": suggestions, "applied": body.apply })))
@@ -886,4 +934,58 @@ async fn ai_checklist(State(state): State<SharedState>, Json(body): Json<Checkli
         return Ok((StatusCode::CREATED, Json(json!({ "checklist": cl, "items": created }))).into_response());
     }
     Ok(ok_json(json!({ "items": items })))
+}
+
+// ---------- settings / backup ----------
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct BackupSettingsBody {
+    backup_dir: Option<String>,
+    interval_hours: Option<i64>,
+    keep: Option<i64>,
+}
+
+async fn get_backup_settings(State(state): State<SharedState>) -> ApiResult<Response> {
+    let s = state.service.backup_settings()?;
+    Ok(ok_json(serde_json::to_value(s).unwrap_or_default()))
+}
+
+async fn put_backup_settings(
+    State(state): State<SharedState>,
+    Json(b): Json<BackupSettingsBody>,
+) -> ApiResult<Response> {
+    let s = state.service.set_backup_settings(b.backup_dir, b.interval_hours, b.keep)?;
+    Ok(ok_json(serde_json::to_value(s).unwrap_or_default()))
+}
+
+async fn run_backup_now(State(state): State<SharedState>) -> ApiResult<Response> {
+    let path = state.service.run_backup_now()?;
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    Ok(ok_json(json!({ "file": path.to_string_lossy(), "size": size })))
+}
+
+// ---------- list duplicate ----------
+
+async fn duplicate_list_route(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
+    let list = state.service.duplicate_list(&id)?;
+    Ok((StatusCode::CREATED, Json(list)).into_response())
+}
+
+/// Native directory picker (Finder / Explorer). Only available when the server
+/// runs inside the Tauri app (`KRELLO_NATIVE_DIALOG=1` set by src-tauri), since
+/// a headless CLI process has no window environment. The dialog is opened by
+/// the shared in-process server, so no webview IPC is needed.
+async fn pick_backup_dir() -> ApiResult<Response> {
+    if std::env::var("KRELLO_NATIVE_DIALOG").as_deref() != Ok("1") {
+        return Err(ApiError(krello_core::Error::Validation(
+            "le sélecteur de répertoire natif n'est disponible que dans l'app Krello (fenêtre native) — saisissez le chemin manuellement en mode navigateur".into(),
+        )));
+    }
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title("Choisir le répertoire de sauvegarde")
+        .pick_folder()
+        .await
+        .map(|h| h.path().to_string_lossy().into_owned());
+    Ok(ok_json(json!({ "dir": picked })))
 }

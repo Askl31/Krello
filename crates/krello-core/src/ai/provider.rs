@@ -28,7 +28,7 @@ pub struct AppleIntelligenceProvider {
 impl AppleIntelligenceProvider {
     pub fn new() -> Self {
         let helper = super::helper::materialize_helper().ok().flatten();
-        let session = HelperSession::new().expect("helper session");
+        let session = HelperSession::new();
         Self {
             helper,
             session,

@@ -8,7 +8,7 @@ use crate::events::Event;
 use crate::ids::new_id;
 use crate::models::*;
 use crate::time::{days_between, now_rfc3339, parse_date};
-use crate::undo::{query_board, row_baseline, row_card};
+use crate::undo::{query_board, row_baseline, row_baseline_snapshot, row_card, UndoAction, UndoEntry};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BaselineDiff {
@@ -37,6 +37,7 @@ impl Service {
         if baseline.name.is_empty() {
             return Err(Error::Validation("nom de baseline requis".into()));
         }
+        let snapshots: Vec<BaselineSnapshot>;
         {
             let db = self.lock_db()?;
             if query_board(&db.conn, board_id)?.is_none() {
@@ -52,7 +53,23 @@ impl Service {
                  WHERE board_id=?1 AND archived=0 AND is_template=0",
                 params![board_id, baseline.id],
             )?;
+            snapshots = {
+                let mut stmt = db
+                    .conn
+                    .prepare("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
+                let v = stmt
+                    .query_map([&baseline.id], row_baseline_snapshot)?
+                    .collect::<rusqlite::Result<_>>()?;
+                v
+            };
         }
+        self.push_undo(UndoEntry {
+            label: format!("Création de la baseline « {} »", baseline.name),
+            actions: vec![UndoAction::BaselineCreated {
+                baseline: baseline.clone(),
+                snapshots,
+            }],
+        });
         self.emit(Event::BaselinesUpdated {
             board_id: board_id.to_string(),
         });
@@ -71,22 +88,36 @@ impl Service {
 
     pub fn delete_baseline(&self, id: &str) -> Result<()> {
         let db = self.lock_db()?;
-        let board_id: Option<String> = db
+        let baseline = db
             .conn
-            .query_row(
-                "SELECT board_id FROM baselines WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
+            .query_row("SELECT * FROM baselines WHERE id=?1", [id], row_baseline)
             .optional()?;
+        // Lire les snapshots AVANT le DELETE (cascade FK).
+        let snapshots: Vec<BaselineSnapshot> = {
+            let mut stmt = db
+                .conn
+                .prepare("SELECT * FROM baseline_snapshots WHERE baseline_id=?1")?;
+            let v = stmt
+                .query_map([id], row_baseline_snapshot)?
+                .collect::<rusqlite::Result<_>>()?;
+            v
+        };
         let n = db.conn.execute("DELETE FROM baselines WHERE id=?1", [id])?;
         if n == 0 {
             return Err(Error::NotFound(format!("baseline {id}")));
         }
         drop(db);
-        if let Some(board_id) = board_id {
-            self.emit(Event::BaselinesUpdated { board_id });
-        }
+        let Some(baseline) = baseline else { return Ok(()) };
+        self.push_undo(UndoEntry {
+            label: format!("Suppression de la baseline « {} »", baseline.name),
+            actions: vec![UndoAction::BaselineDeleted {
+                baseline: baseline.clone(),
+                snapshots,
+            }],
+        });
+        self.emit(Event::BaselinesUpdated {
+            board_id: baseline.board_id,
+        });
         Ok(())
     }
 

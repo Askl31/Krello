@@ -107,8 +107,12 @@ export function renderSidebar(host) {
   boardList.innerHTML = state.boards.map((b) => {
     const active = state.board?.id === b.id;
     const count = b.id === state.board?.id ? state.cards.filter((c) => !c.archived && !c.is_template).length : null;
-    const color = /^#/.test(b.background?.match(/"value":"(#[0-9a-fA-F]+)"/)?.[1] || '')
-      ? b.background.match(/"value":"(#[0-9a-fA-F]+)"/)[1] : 'var(--accent)';
+    let color = 'var(--accent)';
+    try {
+      const c = JSON.parse(b.background || '{}');
+      if (typeof c.value === 'string' && /^#/.test(c.value)) color = c.value;
+      // Dégradé ou type inconnu → accent par défaut (les dégradés ne tiennent pas dans un point).
+    } catch { /* JSON invalide → accent par défaut */ }
     return `
       <div class="sb-board-row" data-board-row="${b.id}">
         <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
@@ -208,43 +212,385 @@ export function renderSidebar(host) {
 }
 
 function showImportDialog() {
+  let selectedFormat = 'auto'; // 'auto' | 'krello' | 'trello'
+  let activeMethod = 'file'; // 'file' | 'text'
+  let rawText = '';
+  let selectedFileName = '';
+  let selectedFileSize = '';
+
   const { el } = openModal(`
     <div class="dialog-header">
       <div class="dialog-badge">${icon('import', { size: 18 })}</div>
       <div class="dialog-titles">
         <h3 class="dialog-title">Importer un board ou un projet</h3>
-        <p class="dialog-desc">Collez le contenu d'un export JSON au format Krello ou Trello pour recréer vos tableaux et cartes.</p>
+        <p class="dialog-desc">Importez vos tableaux et cartes depuis un export JSON Krello ou un export Trello.</p>
       </div>
       <button class="iconbtn dialog-close" data-close title="Fermer (Échap)">${icon('close', { size: 14 })}</button>
     </div>
+
     <div class="dialog-body">
-      <textarea class="input" id="imp-json" style="min-height:170px;font-family:var(--mono);font-size:12px;line-height:1.5" placeholder='{"name": "Mon projet", "lists": [ ... ]}'></textarea>
+      <!-- Sélecteur de format source -->
+      <div class="import-format-bar">
+        <span class="import-format-label">${icon('settings', { size: 13 })} Format source :</span>
+        <div class="viewtabs" id="imp-format-tabs" role="tablist">
+          <button type="button" class="active" data-format="auto" title="Détection automatique selon le contenu">⚡ Auto-détection</button>
+          <button type="button" data-format="krello" title="Export JSON natif Krello">Krello</button>
+          <button type="button" data-format="trello" title="Export de tableau Trello">Trello</button>
+        </div>
+      </div>
+
+      <!-- Onglets mode d'importation -->
+      <div class="import-tabs-row">
+        <div class="viewtabs" id="imp-method-tabs" role="tablist">
+          <button type="button" class="active" data-method="file">${icon('file', { size: 13 })} Fichier .json</button>
+          <button type="button" data-method="text">${icon('edit', { size: 13 })} Coller le JSON</button>
+        </div>
+        <div class="muted" style="font-size:11.5px" id="imp-method-hint">Glissez un fichier ou parcourez</div>
+      </div>
+
+      <!-- Mode 1 : Fichier JSON -->
+      <div id="imp-pane-file">
+        <div class="import-dropzone" id="imp-dropzone" tabindex="0">
+          <input type="file" id="imp-file-input" accept=".json,application/json,text/plain" style="display:none" />
+          <div class="dropzone-icon">${icon('upload', { size: 22 })}</div>
+          <div>
+            <div class="dropzone-title">Glissez votre fichier <strong>.json</strong> ici</div>
+            <div class="dropzone-sub">ou <button type="button" class="btn sm" id="imp-browse-btn" style="pointer-events:auto">Parcourir les fichiers</button></div>
+          </div>
+        </div>
+        <div class="import-file-card" id="imp-file-card" style="display:none">
+          <div class="file-card-icon">${icon('file', { size: 20 })}</div>
+          <div class="file-card-details">
+            <div class="file-card-name" id="imp-file-name">fichier.json</div>
+            <div class="file-card-meta" id="imp-file-meta">0 Ko</div>
+          </div>
+          <button type="button" class="btn ghost sm" id="imp-file-clear" title="Choisir un autre fichier">Remplacer</button>
+        </div>
+      </div>
+
+      <!-- Mode 2 : Coller le JSON -->
+      <div id="imp-pane-text" style="display:none" class="import-text-pane">
+        <div class="import-text-actions">
+          <span class="muted" style="font-size:12px">Contenu brut du JSON :</span>
+          <button type="button" class="btn ghost sm" id="imp-paste-clip" title="Coller depuis le presse-papier">${icon('copy', { size: 12 })} <span>Coller</span></button>
+        </div>
+        <textarea class="input" id="imp-json" style="min-height:140px;font-family:var(--mono);font-size:12px;line-height:1.5;resize:vertical" placeholder='Collez ici le JSON exporté depuis Krello ou Trello...'></textarea>
+      </div>
+
+      <!-- Aperçu de détection -->
+      <div class="import-preview" id="imp-preview" style="display:none">
+        <div class="preview-badge" id="imp-preview-badge">Krello</div>
+        <div class="preview-content">
+          <div class="preview-name" id="imp-preview-title">Tableau</div>
+          <div class="preview-meta" id="imp-preview-meta">0 listes • 0 cartes</div>
+        </div>
+        <div class="preview-check" title="Valide">${icon('check', { size: 18 })}</div>
+      </div>
+
+      <!-- Message d'erreur -->
+      <div class="import-error" id="imp-error" style="display:none">
+        ${icon('alert', { size: 16 })}
+        <span id="imp-error-text">Format non reconnu</span>
+      </div>
     </div>
+
     <div class="dialog-footer">
-      <div class="dialog-hints">
+      <div class="dialog-hints" id="imp-hints">
         <span class="kbd">JSON</span> Krello ou Trello
       </div>
       <div class="dialog-btns">
-        <button class="btn" data-close>Annuler</button>
-        <button class="btn" id="imp-krello">Importer JSON Krello</button>
-        <button class="btn primary" id="imp-trello">Importer export Trello</button>
+        <button type="button" class="btn" data-close>Annuler</button>
+        <button type="button" class="btn primary" id="imp-submit" disabled>
+          ${icon('import', { size: 14 })}
+          <span id="imp-submit-text">Importer</span>
+        </button>
       </div>
     </div>`, { size: 'md' });
-  const doImport = async (fn) => {
-    const text = el.querySelector('#imp-json').value;
-    if (!text.trim()) return toast('Collez le JSON à importer', 'err');
+
+  function inspectJson(text) {
+    if (!text || !text.trim()) return null;
+    let parsed;
     try {
-      const board = await fn(text);
-      await loadBoards();
-      el.closest('.modal-backdrop').remove();
-      toast(`Board « ${board.title} » importé`, 'ok');
-      navigate(boardUrl(board.id, 'board'));
-    } catch (e) {
-      toast(`Import impossible : ${e.message}`, 'err');
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return { status: 'invalid', message: 'Syntaxe JSON invalide : ' + err.message };
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return { status: 'invalid', message: 'Le JSON doit être un objet.' };
+    }
+
+    // Vérifier Krello (format 'krello' ou objet avec 'board' et 'lists')
+    const isKrello = parsed.format === 'krello' || (parsed.board && typeof parsed.board === 'object' && Array.isArray(parsed.lists));
+    if (isKrello) {
+      const title = parsed.board?.title || 'Tableau Krello';
+      const listsCount = Array.isArray(parsed.lists) ? parsed.lists.length : 0;
+      const cardsCount = Array.isArray(parsed.cards) ? parsed.cards.length : 0;
+      return {
+        status: 'ok',
+        format: 'krello',
+        title,
+        listsCount,
+        cardsCount,
+        label: 'Krello JSON',
+      };
+    }
+
+    // Vérifier Trello ('name' et cartes/listes)
+    const isTrello = typeof parsed.name === 'string' && (Array.isArray(parsed.cards) || Array.isArray(parsed.lists) || parsed.idBoard || parsed.id);
+    if (isTrello) {
+      const title = parsed.name || 'Tableau Trello';
+      const listsCount = Array.isArray(parsed.lists) ? parsed.lists.filter((l) => !l.closed).length : 0;
+      const cardsCount = Array.isArray(parsed.cards) ? parsed.cards.filter((c) => !c.closed).length : 0;
+      return {
+        status: 'ok',
+        format: 'trello',
+        title,
+        listsCount,
+        cardsCount,
+        label: 'Export Trello',
+      };
+    }
+
+    return {
+      status: 'unrecognized',
+      message: "Ce fichier n'est pas reconnu comme un export JSON Krello ou Trello.",
+    };
+  }
+
+  function updateUI() {
+    const result = inspectJson(rawText);
+    const previewEl = el.querySelector('#imp-preview');
+    const errorEl = el.querySelector('#imp-error');
+    const submitBtn = el.querySelector('#imp-submit');
+    const submitText = el.querySelector('#imp-submit-text');
+    const hintsEl = el.querySelector('#imp-hints');
+
+    if (!rawText.trim()) {
+      previewEl.style.display = 'none';
+      errorEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitText.textContent = 'Importer';
+      hintsEl.innerHTML = '<span class="kbd">JSON</span> Krello ou Trello';
+      return;
+    }
+
+    if (result.status === 'invalid') {
+      previewEl.style.display = 'none';
+      errorEl.style.display = 'flex';
+      el.querySelector('#imp-error-text').textContent = result.message;
+      submitBtn.disabled = true;
+      submitText.textContent = 'Importer';
+      hintsEl.innerHTML = '<span style="color:var(--error);font-weight:600">JSON invalide</span>';
+      return;
+    }
+
+    const effectiveFormat = selectedFormat === 'auto' ? result.format : selectedFormat;
+
+    if (result.status === 'ok') {
+      errorEl.style.display = 'none';
+      previewEl.style.display = 'flex';
+
+      const badgeEl = el.querySelector('#imp-preview-badge');
+      badgeEl.textContent = effectiveFormat === 'krello' ? 'Krello JSON' : 'Export Trello';
+      badgeEl.className = effectiveFormat === 'trello' ? 'preview-badge trello' : 'preview-badge';
+
+      el.querySelector('#imp-preview-title').textContent = result.title;
+      el.querySelector('#imp-preview-meta').textContent =
+        `${result.listsCount} liste${result.listsCount > 1 ? 's' : ''} • ${result.cardsCount} carte${result.cardsCount > 1 ? 's' : ''}`;
+
+      submitBtn.disabled = false;
+      const shortTitle = result.title.length > 24 ? result.title.slice(0, 22) + '…' : result.title;
+      submitText.textContent = `Importer « ${shortTitle} »`;
+      hintsEl.innerHTML = `<span style="color:var(--success);font-weight:600">✓ Prêt à importer (${effectiveFormat === 'krello' ? 'Krello' : 'Trello'})</span>`;
+    } else {
+      // Non reconnu automatiquement
+      if (selectedFormat !== 'auto') {
+        errorEl.style.display = 'none';
+        previewEl.style.display = 'flex';
+        const badgeEl = el.querySelector('#imp-preview-badge');
+        badgeEl.textContent = selectedFormat === 'krello' ? 'Krello (forcé)' : 'Trello (forcé)';
+        badgeEl.className = selectedFormat === 'trello' ? 'preview-badge trello' : 'preview-badge';
+        el.querySelector('#imp-preview-title').textContent = 'Fichier JSON personnalisé';
+        el.querySelector('#imp-preview-meta').textContent = 'Format forcé manuellement';
+        submitBtn.disabled = false;
+        submitText.textContent = selectedFormat === 'krello' ? 'Importer comme Krello' : 'Importer comme Trello';
+        hintsEl.innerHTML = `<span class="badge">${selectedFormat.toUpperCase()}</span> Format forcé`;
+      } else {
+        previewEl.style.display = 'none';
+        errorEl.style.display = 'flex';
+        el.querySelector('#imp-error-text').textContent = result.message;
+        submitBtn.disabled = true;
+        submitText.textContent = 'Importer';
+        hintsEl.innerHTML = '<span style="color:var(--warning);font-weight:600">Format non reconnu</span>';
+      }
+    }
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    selectedFileName = file.name;
+    const kb = Math.round(file.size / 1024);
+    selectedFileSize = kb > 1024 ? `${(kb / 1024).toFixed(1)} Mo` : `${kb} Ko`;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      rawText = e.target.result;
+      el.querySelector('#imp-json').value = rawText;
+
+      el.querySelector('#imp-dropzone').style.display = 'none';
+      el.querySelector('#imp-file-card').style.display = 'flex';
+      el.querySelector('#imp-file-name').textContent = selectedFileName;
+      el.querySelector('#imp-file-meta').textContent = selectedFileSize;
+
+      updateUI();
+    };
+    reader.onerror = () => {
+      toast('Erreur lors de la lecture du fichier', 'err');
+    };
+    reader.readAsText(file);
+  }
+
+  // --- Format Tabs ---
+  const formatTabs = el.querySelectorAll('#imp-format-tabs button');
+  formatTabs.forEach((btn) => {
+    btn.onclick = () => {
+      formatTabs.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedFormat = btn.dataset.format;
+      updateUI();
+    };
+  });
+
+  // --- Method Tabs ---
+  const methodTabs = el.querySelectorAll('#imp-method-tabs button');
+  const paneFile = el.querySelector('#imp-pane-file');
+  const paneText = el.querySelector('#imp-pane-text');
+  const methodHint = el.querySelector('#imp-method-hint');
+
+  methodTabs.forEach((btn) => {
+    btn.onclick = () => {
+      methodTabs.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeMethod = btn.dataset.method;
+      if (activeMethod === 'file') {
+        paneFile.style.display = 'block';
+        paneText.style.display = 'none';
+        methodHint.textContent = 'Glissez un fichier ou parcourez';
+      } else {
+        paneFile.style.display = 'none';
+        paneText.style.display = 'flex';
+        methodHint.textContent = 'Édition directe du JSON';
+        setTimeout(() => el.querySelector('#imp-json').focus(), 50);
+      }
+    };
+  });
+
+  // --- File Dropzone & Input ---
+  const dropzone = el.querySelector('#imp-dropzone');
+  const fileInput = el.querySelector('#imp-file-input');
+  const browseBtn = el.querySelector('#imp-browse-btn');
+  const fileClearBtn = el.querySelector('#imp-file-clear');
+
+  browseBtn.onclick = (e) => {
+    e.stopPropagation();
+    fileInput.click();
+  };
+
+  dropzone.onclick = () => fileInput.click();
+  dropzone.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
     }
   };
-  el.querySelector('#imp-krello').onclick = () => doImport(api.importKrello);
-  el.querySelector('#imp-trello').onclick = () => doImport(api.importTrello);
+
+  fileInput.onchange = (e) => {
+    const file = e.target.files[0];
+    if (file) handleFile(file);
+  };
+
+  fileClearBtn.onclick = () => {
+    fileInput.value = '';
+    rawText = '';
+    el.querySelector('#imp-json').value = '';
+    el.querySelector('#imp-file-card').style.display = 'none';
+    dropzone.style.display = 'flex';
+    updateUI();
+  };
+
+  dropzone.ondragover = (e) => {
+    e.preventDefault();
+    dropzone.classList.add('drag-over');
+  };
+  dropzone.ondragleave = () => {
+    dropzone.classList.remove('drag-over');
+  };
+  dropzone.ondrop = (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleFile(file);
+  };
+
+  // --- Textarea & Clipboard ---
+  const textarea = el.querySelector('#imp-json');
+  textarea.oninput = (e) => {
+    rawText = e.target.value;
+    updateUI();
+  };
+
+  const pasteBtn = el.querySelector('#imp-paste-clip');
+  pasteBtn.onclick = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        rawText = text;
+        textarea.value = text;
+        updateUI();
+        toast('Contenu du presse-papier collé', 'ok');
+      } else {
+        toast('Presse-papier vide', 'err');
+      }
+    } catch (_) {
+      textarea.focus();
+      toast('Collez directement avec ⌘V dans la zone de texte', 'err');
+    }
+  };
+
+  // --- Submit Import ---
+  const submitBtn = el.querySelector('#imp-submit');
+  submitBtn.onclick = async () => {
+    if (!rawText.trim()) return toast('Veuillez fournir un JSON à importer', 'err');
+
+    const inspection = inspectJson(rawText);
+    let targetFormat = selectedFormat;
+    if (targetFormat === 'auto') {
+      if (inspection?.status === 'ok') {
+        targetFormat = inspection.format;
+      } else {
+        return toast("Impossible de déterminer le format d'importation", 'err');
+      }
+    }
+
+    const importFn = targetFormat === 'trello' ? api.importTrello : api.importKrello;
+    const submitLabel = el.querySelector('#imp-submit-text');
+    const originalLabel = submitLabel.textContent;
+
+    submitBtn.disabled = true;
+    submitLabel.textContent = 'Importation en cours…';
+
+    try {
+      const board = await importFn(rawText);
+      await loadBoards();
+      el.closest('.modal-backdrop').remove();
+      toast(`Board « ${board.title} » importé avec succès`, 'ok');
+      navigate(boardUrl(board.id, 'board'));
+    } catch (err) {
+      submitBtn.disabled = false;
+      submitLabel.textContent = originalLabel;
+      toast(`Import impossible : ${err.message}`, 'err');
+    }
+  };
 }
 
 export function initSidebar(host) {

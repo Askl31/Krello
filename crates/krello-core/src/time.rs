@@ -34,7 +34,7 @@ pub fn parse_dt(s: &str) -> Option<NaiveDateTime> {
         return Some(dt);
     }
     if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return Some(d.and_hms_opt(0, 0, 0)?);
+        return d.and_hms_opt(0, 0, 0);
     }
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Some(dt.naive_local());
@@ -70,7 +70,7 @@ pub fn today() -> NaiveDate {
 
 pub fn weekday(d: NaiveDate) -> u32 {
     // chrono: Monday=0 .. Sunday=6 ; we use 0=Sunday..6=Saturday (JS-like)
-    (d.weekday().num_days_from_sunday()) as u32
+    d.weekday().num_days_from_sunday()
 }
 
 pub fn add_days(d: NaiveDate, days: i64) -> NaiveDate {

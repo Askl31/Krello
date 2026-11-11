@@ -77,11 +77,9 @@ JSON attendu : {{\"title\": str, \"description\": str, \"start\": date|null, \"d
     );
     let v = ask_json(provider, system, &prompt)?;
     let parsed: ParsedTask = serde_json::from_value(v).map_err(|e| Error::Ai(format!("schéma tâche invalide: {e}")))?;
-    for d in [&parsed.start, &parsed.due] {
-        if let Some(d) = d {
-            if parse_date(d).is_none() {
-                return Err(Error::Ai(format!("date générée invalide: {d}")));
-            }
+    for d in [&parsed.start, &parsed.due].into_iter().flatten() {
+        if parse_date(d).is_none() {
+            return Err(Error::Ai(format!("date générée invalide: {d}")));
         }
     }
     if let Some(p) = &parsed.priority {
