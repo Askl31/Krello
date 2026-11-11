@@ -32,10 +32,11 @@ api.aiStatus()
   });
 
 function shellHtml() {
+  const isCollapsed = localStorage.getItem('krello-sidebar-collapsed') === 'true';
   return `
     <div class="topbar" id="topbar"></div>
     <div class="shell">
-      <div class="sidebar" id="sidebar"></div>
+      <div class="sidebar ${isCollapsed ? 'collapsed' : ''}" id="sidebar"></div>
       <div class="main" id="main"><div class="view"></div></div>
     </div>`;
 }
@@ -70,6 +71,8 @@ async function renderRoute() {
       state.view = view;
       await hydrateLabelIds();
       renderTopbar(document.getElementById('topbar'));
+      const sb = document.getElementById('sidebar');
+      if (sb) renderSidebar(sb);
       const main = document.getElementById('main');
       main.innerHTML = '<div class="view"></div>';
       switch (view) {
@@ -83,6 +86,8 @@ async function renderRoute() {
       state.board = null;
       applyBoardBackground(null);
       renderTopbar(document.getElementById('topbar'));
+      const sb = document.getElementById('sidebar');
+      if (sb) renderSidebar(sb);
       document.getElementById('main').innerHTML = '<div class="view"></div>';
       renderSettings();
     } else {

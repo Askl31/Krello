@@ -9,14 +9,48 @@ import { toast, promptDialog, openModal } from '../ui/modal.js';
 import { icon } from '../icons.js';
 
 export function renderSidebar(host) {
+  const isCollapsed = host.classList.contains('collapsed');
+  const board = state.board;
+
   host.innerHTML = `
     <div class="brand">
       <div class="sidebar-avatar" title="Espace de travail Krello">
         <span class="avatar-glyph">👤</span>
       </div>
-      <div class="logo">K</div>
+      <div class="logo" title="Krello">K</div>
       <b>Krello</b>
+      <button class="iconbtn sb-collapse-btn" id="sb-collapse-btn" title="Réduire la barre latérale">
+        ${icon('sidebar', { size: 14 })}
+      </button>
     </div>
+
+    ${board ? `
+    <div class="section rail-views">
+      <div class="label">
+        <span>Vues</span>
+      </div>
+      <button class="item ${state.view === 'board' ? 'active' : ''}" data-rail-view="board" title="Kanban">
+        ${icon('kanban', { size: 15 })}
+        <span class="name">Kanban</span>
+      </button>
+      <button class="item ${state.view === 'calendar' ? 'active' : ''}" data-rail-view="calendar" title="Calendrier">
+        ${icon('calendar', { size: 15 })}
+        <span class="name">Calendrier</span>
+      </button>
+      <button class="item ${state.view === 'timeline' ? 'active' : ''}" data-rail-view="timeline" title="Timeline">
+        ${icon('timeline', { size: 15 })}
+        <span class="name">Timeline</span>
+      </button>
+      <button class="item ${state.view === 'table' ? 'active' : ''}" data-rail-view="table" title="Table">
+        ${icon('table', { size: 15 })}
+        <span class="name">Table</span>
+      </button>
+      <button class="item ${state.view === 'dashboard' ? 'active' : ''}" data-rail-view="dashboard" title="Dashboard">
+        ${icon('dashboard', { size: 15 })}
+        <span class="name">Dashboard</span>
+      </button>
+    </div>` : ''}
+
     <div class="section">
       <div class="label">
         <span>Boards</span>
@@ -26,17 +60,21 @@ export function renderSidebar(host) {
       </div>
       <div id="sb-boards"></div>
     </div>
+
     <div class="section">
-      <div class="label">Données & Outils</div>
-      <button class="item" id="sb-import">
+      <div class="label">
+        <span>Données & Outils</span>
+      </div>
+      <button class="item" id="sb-import" title="Importer…">
         ${icon('import', { size: 15 })}
-        <span>Importer…</span>
+        <span class="name">Importer…</span>
       </button>
-      <button class="item" id="sb-settings">
+      <button class="item" id="sb-settings" title="Paramètres">
         ${icon('settings', { size: 15 })}
-        <span>Paramètres</span>
+        <span class="name">Paramètres</span>
       </button>
     </div>
+
     <div class="foot">
       <button class="search-trigger" id="sb-palette" title="Ouvrir la palette de commandes (⌘K)">
         <span style="display:flex;align-items:center;gap:7px">
@@ -44,6 +82,10 @@ export function renderSidebar(host) {
           <span>Rechercher…</span>
         </span>
         <span class="kbd">⌘K</span>
+      </button>
+      <button class="item sb-expand-btn" id="sb-expand-btn" title="Agrandir la barre latérale">
+        ${icon('sidebar', { size: 15 })}
+        <span class="name">Agrandir</span>
       </button>
     </div>
   `;
@@ -55,16 +97,33 @@ export function renderSidebar(host) {
     const color = /^#/.test(b.background?.match(/"value":"(#[0-9a-fA-F]+)"/)?.[1] || '')
       ? b.background.match(/"value":"(#[0-9a-fA-F]+)"/)[1] : 'var(--accent)';
     return `
-      <button class="item ${active ? 'active' : ''}" data-board="${b.id}">
+      <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
         <span class="dot" style="background:${color};color:${color}"></span>
         <span class="name">${escapeHtml(b.title)}</span>
         ${count !== null ? `<span class="count">${count}</span>` : ''}
       </button>`;
-  }).join('') || `<div class="muted" style="padding:8px 12px;font-size:12.5px">Aucun board</div>`;
+  }).join('') || `<div class="muted sb-no-board" style="padding:8px 12px;font-size:12.5px">Aucun board</div>`;
 
   boardList.querySelectorAll('[data-board]').forEach((b) => {
     b.onclick = () => navigate(boardUrl(b.dataset.board, 'board'));
   });
+
+  host.querySelectorAll('[data-rail-view]').forEach((b) => {
+    b.onclick = () => {
+      if (state.board) {
+        navigate(boardUrl(state.board.id, b.dataset.railView));
+      }
+    };
+  });
+
+  const toggleCollapse = () => {
+    host.classList.toggle('collapsed');
+    const collapsed = host.classList.contains('collapsed');
+    localStorage.setItem('krello-sidebar-collapsed', collapsed ? 'true' : 'false');
+  };
+
+  host.querySelector('#sb-collapse-btn')?.addEventListener('click', toggleCollapse);
+  host.querySelector('#sb-expand-btn')?.addEventListener('click', toggleCollapse);
 
   host.querySelector('#sb-new').onclick = async () => {
     const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Lancement produit');

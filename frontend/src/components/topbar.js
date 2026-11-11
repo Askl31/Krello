@@ -23,7 +23,7 @@ export function renderTopbar(host) {
   const isTranslucent = state.style === 'translucent';
 
   host.innerHTML = `
-    <button class="iconbtn" id="tb-boards" title="Afficher/masquer les boards">${icon('sidebar', { size: 16 })}</button>
+    <button class="iconbtn" id="tb-boards" title="Réduire ou agrandir la barre latérale">${icon('sidebar', { size: 16 })}</button>
     <div class="logo">K</div>
     <h1 ${inBoard ? 'id="tb-title" title="Cliquez pour renommer" style="cursor:pointer"' : ''}>${inBoard ? escapeHtml(state.board.title) : 'Krello'}</h1>
     <div class="spacer"></div>
@@ -60,7 +60,8 @@ export function renderTopbar(host) {
   host.querySelector('#tb-boards')?.addEventListener('click', () => {
     const sb = document.querySelector('.sidebar');
     if (sb) {
-      sb.classList.toggle('hidden');
+      sb.classList.toggle('collapsed');
+      localStorage.setItem('krello-sidebar-collapsed', sb.classList.contains('collapsed') ? 'true' : 'false');
     }
   });
 
