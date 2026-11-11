@@ -14,15 +14,15 @@ fn migration_is_idempotent_and_creates_schema() {
         .conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
-             ('boards','lists','cards','labels','card_labels','checklists','checklist_items',
+            ('boards','lists','cards','labels','card_labels','checklists','checklist_items',
               'custom_field_defs','custom_field_values','attachments','comments','activity',
               'dependencies','schedule_cache','baselines','baseline_snapshots','calendars',
-              'automations','board_views','cards_fts')",
+              'automations','automation_runs','board_views','cards_fts')",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 20, "expected all 20 schema objects");
+    assert_eq!(n, 21, "expected all 21 schema objects");
 
     let version: i64 = db
         .conn

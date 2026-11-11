@@ -23,6 +23,7 @@ pub enum Event {
     DependenciesUpdated { board_id: String },
     ScheduleUpdated { board_id: String },
     AutomationsUpdated { board_id: String },
+    AutomationRan { board_id: String },
     BaselinesUpdated { board_id: String },
     CalendarsUpdated { calendar_id: String },
     UndoApplied { board_id: Option<String> },

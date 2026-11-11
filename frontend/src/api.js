@@ -35,6 +35,7 @@ export const api = {
   createBoard: (b) => api.post('/api/v1/boards', b),
   updateBoard: (id, p) => api.patch(`/api/v1/boards/${id}`, p),
   deleteBoard: (id) => api.del(`/api/v1/boards/${id}`),
+  deleteAllBoards: () => api.del('/api/v1/boards'),
   duplicateBoard: (id) => api.post(`/api/v1/boards/${id}/duplicate`),
   boardActivity: (id, limit = 60) => api.get(`/api/v1/boards/${id}/activity?limit=${limit}`),
 
@@ -104,6 +105,8 @@ export const api = {
   updateAutomation: (id, p) => api.patch(`/api/v1/automations/${id}`, p),
   deleteAutomation: (id) => api.del(`/api/v1/automations/${id}`),
   runAutomation: (id) => api.post(`/api/v1/automations/${id}/run`),
+  automationRuns: (id, limit = 50) => api.get(`/api/v1/automations/${id}/runs?limit=${limit}`),
+  boardAutomationRuns: (boardId, limit = 100) => api.get(`/api/v1/boards/${boardId}/automations/runs?limit=${limit}`),
 
   calendars: () => api.get('/api/v1/calendars'),
   createCalendar: (c) => api.post('/api/v1/calendars', c),

@@ -13,7 +13,7 @@ Toutes les réponses sont en JSON (sauf exports). Erreurs :
 |---|---|
 | `GET /boards?include_archived=` | liste |
 | `POST /boards` | `{title, description?, background?, calendar_id?, start_date?, deadline?}` |
-| `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade) |
+| `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade, undoable ⌘Z) · `DELETE /boards` → `{deleted: n}` = **tout supprimer** (boards archivés compris, pièces jointes purgées du disque, une seule entrée undo) |
 | `POST /boards/{id}/duplicate` | copie profonde |
 | `GET /boards/{id}/activity?limit=` | flux d'activité |
 | `GET /boards/{id}/lists` `POST` | listes |
@@ -56,11 +56,12 @@ Toutes les réponses sont en JSON (sauf exports). Erreurs :
 `POST /boards/{id}/baselines {name}` · `DELETE /baselines/{id}` ·
 `GET /baselines/{id}/compare` → `[{card_id, title, start_baseline, start_now, due_baseline, due_now, duration_*, work_*, delta_due_days}]`.
 
-## Automatisations
+## Automatisations (voir `docs/AUTOMATIONS.md` pour le DSL complet)
 `POST /boards/{id}/automations` `{name, trigger, conditions?, actions?, enabled?}` ·
-`PATCH/DELETE /automations/{id}` · `POST /automations/{id}/run` → `{cards_touched}`.
-Conditions : `{"list_id","from_list_id","to_list_id","label_id","title_contains","days"}`.
-Actions : `[{"type":"move","list_id"},{"type":"label","label_id"},{"type":"due","offset_days","time"},{"type":"priority","value"},{"type":"check","item_title"},{"type":"archive"}]`.
+`PATCH/DELETE /automations/{id}` · `POST /automations/{id}/run` → `{cards_touched}` ·
+`GET /automations/{id}/runs?limit=50` · `GET /boards/{id}/automations/runs?limit=100` (journal `automation_runs`).
+Déclencheurs : `card_created, card_moved, card_labeled, card_unlabeled, card_archived, card_commented, checklist_item_checked, card_due_soon, card_due, button, scheduled_daily, scheduled_weekly, scheduled_monthly`.
+Actions cross-board possibles (`list_id` de n'importe quel board) : `move, copy, create_card, label, unlabel, due, clear_due, priority, check, check_item, archive, unarchive, comment, set_title, set_field` — avec variables `{{card.title}}`, `{{list.title}}`, `{{board.title}}`, `{{date}}`…
 
 ## Calendriers
 `GET/POST /calendars` `{name, weekends?: "[6,0]", holidays?: "[\"2027-01-01\"]", hours_per_day?}` · `PATCH/DELETE /calendars/{id}`.

@@ -35,9 +35,14 @@ impl Service {
             )?;
             drop(db);
             self.emit(Event::CommentsUpdated {
-                board_id: card.board_id,
+                board_id: card.board_id.clone(),
                 card_id: card_id.to_string(),
             });
+            self.run_automations(
+                &card.board_id,
+                "card_commented",
+                &serde_json::json!({ "card_id": card_id, "comment_id": comment.id }),
+            );
         }
         self.push_undo(UndoEntry {
             label: "Ajout d'un commentaire".into(),

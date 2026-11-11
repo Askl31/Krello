@@ -244,6 +244,7 @@ impl Service {
             || before.units != after.units
             || before.hours_per_day != after.hours_per_day
             || before.is_milestone != after.is_milestone;
+        let archived_now = !before.archived && after.archived;
         let board_id = after.board_id.clone();
         let entry = UndoEntry {
             label: format!("Modification de la carte « {} »", after.title),
@@ -261,6 +262,13 @@ impl Service {
             board_id: board_id.clone(),
             card_id: id.to_string(),
         });
+        if archived_now {
+            self.run_automations(
+                &board_id,
+                "card_archived",
+                &serde_json::json!({ "card_id": id, "list_id": after.list_id }),
+            );
+        }
         Ok(after)
     }
 
@@ -383,6 +391,7 @@ impl Service {
         }
 
         let from = before.list_id.clone();
+        let from_board = before.board_id.clone();
         let to = after.list_id.clone();
         let board_id = after.board_id.clone();
         let entry = UndoEntry {
@@ -401,8 +410,27 @@ impl Service {
         self.run_automations(
             &board_id,
             "card_moved",
-            &serde_json::json!({ "card_id": id, "from_list_id": from, "to_list_id": to }),
+            &serde_json::json!({
+                "card_id": id,
+                "from_list_id": from,
+                "to_list_id": to,
+                "from_board_id": from_board,
+                "to_board_id": board_id,
+            }),
         );
+        if from_board != board_id {
+            self.run_automations(
+                &from_board,
+                "card_moved",
+                &serde_json::json!({
+                    "card_id": id,
+                    "from_list_id": from,
+                    "to_list_id": to,
+                    "from_board_id": from_board,
+                    "to_board_id": board_id,
+                }),
+            );
+        }
         Ok(after)
     }
 

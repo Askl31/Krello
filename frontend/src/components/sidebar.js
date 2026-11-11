@@ -5,12 +5,14 @@ import { escapeHtml } from '../format.js';
 import { state, loadBoards } from '../state.js';
 import { boardUrl, navigate } from '../router.js';
 import { on } from '../ws.js';
-import { toast, promptDialog, openModal } from '../ui/modal.js';
+import { toast, promptDialog, openModal, confirmDialog } from '../ui/modal.js';
 import { icon } from '../icons.js';
 
 export function renderSidebar(host) {
+  const prevScrollTop = host.querySelector('.sidebar-body')?.scrollTop || 0;
   const isCollapsed = host.classList.contains('collapsed');
   const board = state.board;
+  const boardsCollapsed = localStorage.getItem('krello-boards-collapsed') === 'true';
 
   host.innerHTML = `
     <div class="brand">
@@ -24,55 +26,61 @@ export function renderSidebar(host) {
       </button>
     </div>
 
-    ${board ? `
-    <div class="section rail-views">
-      <div class="label">
-        <span>Vues</span>
-      </div>
-      <button class="item ${state.view === 'board' ? 'active' : ''}" data-rail-view="board" title="Kanban">
-        ${icon('kanban', { size: 15 })}
-        <span class="name">Kanban</span>
-      </button>
-      <button class="item ${state.view === 'calendar' ? 'active' : ''}" data-rail-view="calendar" title="Calendrier">
-        ${icon('calendar', { size: 15 })}
-        <span class="name">Calendrier</span>
-      </button>
-      <button class="item ${state.view === 'timeline' ? 'active' : ''}" data-rail-view="timeline" title="Timeline">
-        ${icon('timeline', { size: 15 })}
-        <span class="name">Timeline</span>
-      </button>
-      <button class="item ${state.view === 'table' ? 'active' : ''}" data-rail-view="table" title="Table">
-        ${icon('table', { size: 15 })}
-        <span class="name">Table</span>
-      </button>
-      <button class="item ${state.view === 'dashboard' ? 'active' : ''}" data-rail-view="dashboard" title="Dashboard">
-        ${icon('dashboard', { size: 15 })}
-        <span class="name">Dashboard</span>
-      </button>
-    </div>` : ''}
+    <div class="sidebar-body" id="sb-body">
+      ${board ? `
+      <div class="section rail-views">
+        <div class="label">
+          <span>Vues</span>
+        </div>
+        <button class="item ${state.view === 'board' ? 'active' : ''}" data-rail-view="board" title="Kanban">
+          ${icon('kanban', { size: 15 })}
+          <span class="name">Kanban</span>
+        </button>
+        <button class="item ${state.view === 'calendar' ? 'active' : ''}" data-rail-view="calendar" title="Calendrier">
+          ${icon('calendar', { size: 15 })}
+          <span class="name">Calendrier</span>
+        </button>
+        <button class="item ${state.view === 'timeline' ? 'active' : ''}" data-rail-view="timeline" title="Timeline">
+          ${icon('timeline', { size: 15 })}
+          <span class="name">Timeline</span>
+        </button>
+        <button class="item ${state.view === 'table' ? 'active' : ''}" data-rail-view="table" title="Table">
+          ${icon('table', { size: 15 })}
+          <span class="name">Table</span>
+        </button>
+        <button class="item ${state.view === 'dashboard' ? 'active' : ''}" data-rail-view="dashboard" title="Dashboard">
+          ${icon('dashboard', { size: 15 })}
+          <span class="name">Dashboard</span>
+        </button>
+      </div>` : ''}
 
-    <div class="section">
-      <div class="label">
-        <span>Boards</span>
-        <button class="iconbtn" id="sb-new" title="Nouveau board" style="width:24px;height:24px">
-          ${icon('plus', { size: 14 })}
+      <div class="section sb-section-boards ${boardsCollapsed ? 'is-collapsed' : ''}">
+        <div class="label">
+          <button class="sb-section-toggle" id="sb-boards-toggle" type="button" title="${boardsCollapsed ? 'Développer les boards' : 'Réduire les boards'}" aria-expanded="${!boardsCollapsed}">
+            <span class="sb-section-chevron">${icon('chevronDown', { size: 12 })}</span>
+            <span>Boards</span>
+            <span class="sb-boards-count-badge">${state.boards.length}</span>
+          </button>
+          <button class="iconbtn" id="sb-new" title="Nouveau board" style="width:24px;height:24px">
+            ${icon('plus', { size: 14 })}
+          </button>
+        </div>
+        <div id="sb-boards"></div>
+      </div>
+
+      <div class="section">
+        <div class="label">
+          <span>Données & Outils</span>
+        </div>
+        <button class="item" id="sb-import" title="Importer…">
+          ${icon('import', { size: 15 })}
+          <span class="name">Importer…</span>
+        </button>
+        <button class="item ${state.view === 'settings' ? 'active' : ''}" id="sb-settings" title="Paramètres">
+          ${icon('settings', { size: 15 })}
+          <span class="name">Paramètres</span>
         </button>
       </div>
-      <div id="sb-boards"></div>
-    </div>
-
-    <div class="section">
-      <div class="label">
-        <span>Données & Outils</span>
-      </div>
-      <button class="item" id="sb-import" title="Importer…">
-        ${icon('import', { size: 15 })}
-        <span class="name">Importer…</span>
-      </button>
-      <button class="item ${state.view === 'settings' ? 'active' : ''}" id="sb-settings" title="Paramètres">
-        ${icon('settings', { size: 15 })}
-        <span class="name">Paramètres</span>
-      </button>
     </div>
 
     <div class="foot">
@@ -90,6 +98,11 @@ export function renderSidebar(host) {
     </div>
   `;
 
+  if (prevScrollTop > 0) {
+    const sbBody = host.querySelector('.sidebar-body');
+    if (sbBody) sbBody.scrollTop = prevScrollTop;
+  }
+
   const boardList = host.querySelector('#sb-boards');
   boardList.innerHTML = state.boards.map((b) => {
     const active = state.board?.id === b.id;
@@ -97,17 +110,41 @@ export function renderSidebar(host) {
     const color = /^#/.test(b.background?.match(/"value":"(#[0-9a-fA-F]+)"/)?.[1] || '')
       ? b.background.match(/"value":"(#[0-9a-fA-F]+)"/)[1] : 'var(--accent)';
     return `
-      <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
-        <span class="dot" style="background:${color};color:${color}"></span>
-        <span class="name">${escapeHtml(b.title)}</span>
-        ${count !== null ? `<span class="count">${count}</span>` : ''}
-      </button>`;
+      <div class="sb-board-row" data-board-row="${b.id}">
+        <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
+          <span class="dot" style="background:${color};color:${color}"></span>
+          <span class="name">${escapeHtml(b.title)}</span>
+          ${count !== null ? `<span class="count">${count}</span>` : ''}
+        </button>
+        <button class="iconbtn sb-board-del" data-del-board="${b.id}" title="Supprimer le board « ${escapeHtml(b.title)} »">
+          ${icon('trash', { size: 13 })}
+        </button>
+      </div>`;
   }).join('') || `<div class="muted sb-no-board" style="padding:8px 12px;font-size:12.5px">Aucun board</div>`;
 
   boardList.querySelectorAll('[data-board]').forEach((b) => {
     b.onclick = () => {
       const targetView = state.view === 'settings' ? 'settings' : 'board';
       navigate(boardUrl(b.dataset.board, targetView));
+    };
+  });
+  boardList.querySelectorAll('[data-del-board]').forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const bid = b.dataset.delBoard;
+      const title = state.boards.find((x) => x.id === bid)?.title || bid;
+      if (!(await confirmDialog(`Supprimer définitivement le board « ${title} » ? Toutes ses listes, cartes et règles seront supprimées (annulable avec ⌘Z dans la session).`))) return;
+      try {
+        await api.deleteBoard(bid);
+        await loadBoards();
+        toast(`Board « ${title} » supprimé`, 'ok');
+        if (state.board?.id === bid) {
+          if (state.boards.length) navigate(boardUrl(state.boards[0].id, 'board'));
+          else { state.board = null; navigate('#/'); }
+        } else {
+          renderSidebar(host);
+        }
+      } catch (err) { toast(err.message, 'err'); }
     };
   });
 
@@ -125,13 +162,30 @@ export function renderSidebar(host) {
     localStorage.setItem('krello-sidebar-collapsed', collapsed ? 'true' : 'false');
   };
 
+  const toggleBoards = (e) => {
+    e?.stopPropagation();
+    const boardsSec = host.querySelector('.sb-section-boards');
+    if (!boardsSec) return;
+    boardsSec.classList.toggle('is-collapsed');
+    const isNowCollapsed = boardsSec.classList.contains('is-collapsed');
+    localStorage.setItem('krello-boards-collapsed', isNowCollapsed ? 'true' : 'false');
+    const toggleBtn = host.querySelector('#sb-boards-toggle');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-expanded', (!isNowCollapsed).toString());
+      toggleBtn.setAttribute('title', isNowCollapsed ? 'Développer les boards' : 'Réduire les boards');
+    }
+  };
+
   host.querySelector('#sb-collapse-btn')?.addEventListener('click', toggleCollapse);
   host.querySelector('#sb-expand-btn')?.addEventListener('click', toggleCollapse);
+  host.querySelector('#sb-boards-toggle')?.addEventListener('click', toggleBoards);
 
-  host.querySelector('#sb-new').onclick = async () => {
+  host.querySelector('#sb-new').onclick = async (e) => {
+    e.stopPropagation();
     const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Lancement produit');
     if (!name) return;
     const b = await api.createBoard({ title: name });
+    localStorage.setItem('krello-boards-collapsed', 'false');
     await loadBoards();
     navigate(boardUrl(b.id, 'board'));
   };

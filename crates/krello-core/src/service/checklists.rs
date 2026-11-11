@@ -153,6 +153,7 @@ impl Service {
             after.due = u.due;
         }
         update_checklist_item_row(&db.conn, &after)?;
+        let checked_now = !before.checked && after.checked;
         let cl = db
             .conn
             .query_row("SELECT * FROM checklists WHERE id=?1", [&after.checklist_id], row_checklist)
@@ -166,9 +167,20 @@ impl Service {
             actions: vec![UndoAction::ChecklistItemUpdated { before, after: after.clone() }],
         });
         self.emit(Event::ChecklistsUpdated {
-            board_id: card.board_id,
-            card_id: card.id,
+            board_id: card.board_id.clone(),
+            card_id: card.id.clone(),
         });
+        if checked_now {
+            self.run_automations(
+                &card.board_id,
+                "checklist_item_checked",
+                &serde_json::json!({
+                    "card_id": card.id,
+                    "item_id": after.id,
+                    "item_title": after.title,
+                }),
+            );
+        }
         Ok(after)
     }
 

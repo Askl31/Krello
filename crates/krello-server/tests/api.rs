@@ -270,3 +270,49 @@ async fn trello_import_endpoint() {
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 }
+
+#[tokio::test]
+async fn delete_all_boards_route_wipes_everything() {
+    let app = test_krello_app();
+    for i in 0..3 {
+        let (status, b) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": format!("B{i}") }))).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let bid = b["id"].as_str().unwrap().to_string();
+        let (_, l) = json_req(&app, "POST", &format!("/api/v1/boards/{bid}/lists"), Some(serde_json::json!({ "title": "L" }))).await;
+        let lid = l["id"].as_str().unwrap().to_string();
+        let (status, _) = json_req(&app, "POST", &format!("/api/v1/boards/{bid}/cards"), Some(serde_json::json!({ "title": "c", "list_id": lid }))).await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+    let (status, boards) = json_req(&app, "GET", "/api/v1/boards?include_archived=true", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(boards.as_array().unwrap().len(), 3);
+
+    let (status, res) = json_req(&app, "DELETE", "/api/v1/boards", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["deleted"], 3);
+
+    let (_, boards) = json_req(&app, "GET", "/api/v1/boards?include_archived=true", None).await;
+    assert_eq!(boards.as_array().unwrap().len(), 0, "tous les boards supprimés");
+
+    // supprimer encore → 0, pas d'erreur
+    let (status, res) = json_req(&app, "DELETE", "/api/v1/boards", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(res["deleted"], 0);
+}
+
+#[tokio::test]
+async fn delete_single_board_route_still_works() {
+    let app = test_krello_app();
+    let (_, b1) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "A" }))).await;
+    let (_, b2) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "B" }))).await;
+    let bid1 = b1["id"].as_str().unwrap().to_string();
+    let (status, _) = json_req(&app, "DELETE", &format!("/api/v1/boards/{bid1}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, boards) = json_req(&app, "GET", "/api/v1/boards", None).await;
+    let arr = boards.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], b2["id"]);
+    // 404 si inconnu
+    let (status, _) = json_req(&app, "DELETE", "/api/v1/boards/board_nope", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

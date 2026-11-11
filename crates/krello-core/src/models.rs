@@ -243,6 +243,22 @@ pub struct Automation {
     pub created_at: String,
 }
 
+/// One execution of an automation rule (audit log; also used to dedupe scheduled triggers per day).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutomationRun {
+    pub id: String,
+    pub automation_id: String,
+    /// Board owning the rule.
+    pub board_id: String,
+    pub trigger: String,
+    /// Target card, NULL for board-level runs.
+    pub card_id: Option<String>,
+    pub ok: bool,
+    /// JSON detail: applied actions or error message.
+    pub detail: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BoardView {
     pub board_id: String,

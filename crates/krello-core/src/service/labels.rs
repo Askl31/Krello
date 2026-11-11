@@ -169,9 +169,14 @@ impl Service {
                 }],
             });
             self.emit(Event::LabelsUpdated {
-                board_id,
+                board_id: board_id.clone(),
                 card_id: Some(card_id.to_string()),
             });
+            self.run_automations(
+                &board_id,
+                "card_unlabeled",
+                &serde_json::json!({ "card_id": card_id, "label_id": label_id }),
+            );
         }
         Ok(())
     }

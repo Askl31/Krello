@@ -197,7 +197,7 @@ on('*', (evt) => {
     scheduleReload();
   } else if (t === 'BoardDeleted' || t === 'BoardCreated') {
     scheduleReload();
-  } else if (t === 'AutomationsUpdated' || t === 'BaselinesUpdated') {
+  } else if (t === 'AutomationsUpdated' || t === 'AutomationRan' || t === 'BaselinesUpdated') {
     scheduleReload();
   }
 });

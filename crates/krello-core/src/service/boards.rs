@@ -149,42 +149,89 @@ impl Service {
     }
 
     pub fn delete_board(&self, id: &str) -> Result<()> {
-        let db = self.lock_db()?;
-        let board =
-            query_board(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("board {id}")))?;
-        let lists: Vec<List> = {
-            let mut stmt =
-                db.conn.prepare("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
-            let v = stmt
-                .query_map([id], row_list)?
-                .collect::<rusqlite::Result<_>>()?;
-            v
-        };
-        let mut cards = Vec::new();
-        {
-            let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE board_id=?1")?;
-            let ids: Vec<String> = stmt
-                .query_map([id], |r| r.get::<_, String>(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            for cid in ids {
-                cards.push(snapshot_card(&db.conn, &cid)?);
-            }
+        let n = self.delete_boards_inner(&[id.to_string()])?;
+        if n == 0 {
+            return Err(Error::NotFound(format!("board {id}")));
         }
-        let entry = UndoEntry {
-            label: format!("Suppression du board « {} »", board.title),
-            actions: vec![UndoAction::BoardDeleted {
+        Ok(())
+    }
+
+    /// Delete ALL boards (including archived), purging attachment files and run logs.
+    /// Single undo entry containing every BoardDeleted snapshot. Returns the count.
+    pub fn delete_all_boards(&self) -> Result<usize> {
+        let boards = self.list_boards(true)?;
+        let ids: Vec<String> = boards.iter().map(|b| b.id.clone()).collect();
+        self.delete_boards_inner(&ids)
+    }
+
+    fn delete_boards_inner(&self, ids: &[String]) -> Result<usize> {
+        let db = self.lock_db()?;
+        let mut actions: Vec<UndoAction> = Vec::new();
+        let mut deleted: Vec<String> = Vec::new();
+        for id in ids {
+            let Some(board) = query_board(&db.conn, id)? else {
+                continue;
+            };
+            let lists: Vec<List> = {
+                let mut stmt =
+                    db.conn.prepare("SELECT * FROM lists WHERE board_id=?1 ORDER BY position")?;
+                let v = stmt
+                    .query_map([id], row_list)?
+                    .collect::<rusqlite::Result<_>>()?;
+                v
+            };
+            let mut cards = Vec::new();
+            {
+                let mut stmt = db.conn.prepare("SELECT id FROM cards WHERE board_id=?1")?;
+                let cids: Vec<String> = stmt
+                    .query_map([id], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                drop(stmt);
+                for cid in cids {
+                    cards.push(snapshot_card(&db.conn, &cid)?);
+                }
+                // purge des fichiers pièces jointes du board
+                let mut st = db.conn.prepare(
+                    "SELECT stored_path FROM attachments WHERE card_id IN (SELECT id FROM cards WHERE board_id=?1)",
+                )?;
+                let paths: Vec<String> = st
+                    .query_map([id], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                drop(st);
+                for p in paths {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+            db.conn.execute("DELETE FROM boards WHERE id=?1", [id])?;
+            db.conn.execute("DELETE FROM automation_runs WHERE board_id=?1", [id])?;
+            actions.push(UndoAction::BoardDeleted {
                 board: board.clone(),
                 lists,
                 cards,
-            }],
-        };
-        db.conn.execute("DELETE FROM boards WHERE id=?1", [id])?;
+            });
+            deleted.push(id.clone());
+        }
         drop(db);
-        self.push_undo(entry);
-        self.emit(Event::BoardDeleted {
-            board_id: id.to_string(),
-        });
-        Ok(())
+        if actions.is_empty() {
+            return Ok(0);
+        }
+        let label = if actions.len() == 1 {
+            match &actions[0] {
+                UndoAction::BoardDeleted { board, .. } => {
+                    format!("Suppression du board « {} »", board.title)
+                }
+                _ => "Suppression".into(),
+            }
+        } else {
+            format!("Suppression de {} boards", actions.len())
+        };
+        self.push_undo(UndoEntry { label, actions });
+        for id in &deleted {
+            self.emit(Event::BoardDeleted {
+                board_id: id.clone(),
+            });
+        }
+        Ok(deleted.len())
     }
 
     /// Deep-copy a board (labels, lists, non-archived cards with children,

@@ -520,6 +520,33 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 }
             }
         }
+        if let Some(autos) = doc.get("automations").and_then(|v| v.as_array()) {
+            for av in autos {
+                let mut a: Automation = match serde_json::from_value(av.clone()) {
+                    Ok(a) => a,
+                    Err(_) => continue,
+                };
+                if !crate::service::automations::TRIGGERS.contains(&a.trigger.as_str()) {
+                    continue; // règle inconnue : ignorée plutôt que d'échouer l'import
+                }
+                a.id = crate::ids::new_id("auto");
+                a.board_id = new_board.id.clone();
+                a.created_at = crate::time::now_rfc3339();
+                let mut conds: serde_json::Value =
+                    serde_json::from_str(&a.conditions).unwrap_or_else(|_| serde_json::json!({}));
+                remap_ref(&mut conds, &list_map, &label_map);
+                a.conditions = conds.to_string();
+                let mut acts: serde_json::Value =
+                    serde_json::from_str(&a.actions).unwrap_or_else(|_| serde_json::json!([]));
+                remap_ref(&mut acts, &list_map, &label_map);
+                a.actions = acts.to_string();
+                if crate::service::automations::validate_actions(&a.actions).is_ok()
+                    && crate::service::automations::validate_conditions(&a.conditions).is_ok()
+                {
+                    crate::service::automations::insert_automation_row(&db.conn, &a)?;
+                }
+            }
+        }
     }
     drop_map(&label_map);
     crate::scheduler::recompute_service(service, &new_board.id)?;
@@ -527,6 +554,54 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
         board_id: new_board.id.clone(),
     });
     Ok(new_board)
+}
+
+/// Remappe récursivement les ids board-scopés (listes, labels) référencés dans
+/// les conditions/actions d'une règle importée. Les clés inconnues sont retirées.
+fn remap_ref(
+    v: &mut serde_json::Value,
+    lists: &std::collections::HashMap<String, String>,
+    labels: &std::collections::HashMap<String, String>,
+) {
+    match v {
+        serde_json::Value::Object(obj) => {
+            for key in ["list_id", "from_list_id", "to_list_id", "label_id", "without_label_id"] {
+                if let Some(val) = obj.get(key).cloned() {
+                    if let Some(s) = val.as_str() {
+                        let map = if key.contains("label") { labels } else { lists };
+                        match map.get(s) {
+                            Some(n) => {
+                                obj.insert(key.to_string(), serde_json::Value::String(n.clone()));
+                            }
+                            None => {
+                                obj.remove(key);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(arr) = obj.get_mut("list_ids").and_then(|v| v.as_array_mut()) {
+                let mut out = Vec::new();
+                for item in arr.iter() {
+                    if let Some(s) = item.as_str() {
+                        if let Some(n) = lists.get(s) {
+                            out.push(serde_json::Value::String(n.clone()));
+                        }
+                    }
+                }
+                *obj.get_mut("list_ids").unwrap() = serde_json::Value::Array(out);
+            }
+            for val in obj.values_mut() {
+                remap_ref(val, lists, labels);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                remap_ref(item, lists, labels);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn drop_map<T>(m: &std::collections::HashMap<String, T>) {

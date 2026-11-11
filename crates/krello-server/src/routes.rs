@@ -21,7 +21,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/undo", post(undo).delete(clear_undo).get(undo_labels))
         .route("/redo", post(redo))
         // boards
-        .route("/boards", get(list_boards).post(create_board))
+        .route("/boards", get(list_boards).post(create_board).delete(delete_all_boards))
         .route("/boards/{id}", get(get_board).patch(update_board).delete(delete_board))
         .route("/boards/{id}/duplicate", post(duplicate_board))
         .route("/boards/{id}/activity", get(board_activity))
@@ -34,6 +34,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/schedule", get(get_schedule).post(recompute_schedule))
         .route("/boards/{id}/baselines", get(list_baselines).post(create_baseline))
         .route("/boards/{id}/automations", get(list_automations).post(create_automation))
+        .route("/boards/{id}/automations/runs", get(list_board_automation_runs))
         .route("/boards/{id}/export", get(export_board))
         .route("/boards/{id}/views/{view}", put(set_view_settings))
         .route("/boards/{id}/views", get(get_view_settings))
@@ -65,6 +66,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/baselines/{id}/compare", get(compare_baseline))
         .route("/automations/{id}", patch(update_automation).delete(delete_automation))
         .route("/automations/{id}/run", post(run_automation))
+        .route("/automations/{id}/runs", get(list_automation_runs))
         .route("/calendars", get(list_calendars).post(create_calendar))
         .route("/calendars/{id}", patch(update_calendar).delete(delete_calendar))
         .route("/comments/{id}", delete(delete_comment))
@@ -168,6 +170,11 @@ async fn update_board(
 async fn delete_board(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     state.service.delete_board(&id)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn delete_all_boards(State(state): State<SharedState>) -> ApiResult<Response> {
+    let n = state.service.delete_all_boards()?;
+    Ok(ok_json(json!({ "deleted": n })))
 }
 
 async fn duplicate_board(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
@@ -562,6 +569,29 @@ async fn delete_automation(State(state): State<SharedState>, Path(id): Path<Stri
 async fn run_automation(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     let count = state.service.run_automation(&id)?;
     Ok(ok_json(json!({ "cards_touched": count })))
+}
+
+async fn list_automation_runs(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Query(q): Query<RunsQuery>,
+) -> ApiResult<Response> {
+    let runs = state.service.list_automation_runs(&id, q.limit.unwrap_or(50))?;
+    Ok(Json(runs).into_response())
+}
+
+async fn list_board_automation_runs(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Query(q): Query<RunsQuery>,
+) -> ApiResult<Response> {
+    let runs = state.service.list_board_automation_runs(&id, q.limit.unwrap_or(100))?;
+    Ok(Json(runs).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct RunsQuery {
+    limit: Option<i64>,
 }
 
 // ---------- calendars ----------

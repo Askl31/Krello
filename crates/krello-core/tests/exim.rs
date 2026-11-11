@@ -154,3 +154,58 @@ fn unknown_format_rejected() {
     assert_eq!(ExportFormat::parse("ics").unwrap(), ExportFormat::Ics);
     assert_eq!(ExportFormat::parse("csv").unwrap(), ExportFormat::Csv);
 }
+
+#[test]
+fn json_export_import_roundtrips_automations_with_remapped_ids() {
+    let s = test_service();
+    let (b, l) = board_with_list(&s);
+    let l2 = s.create_list(&b, CreateList { title: "Terminé".into(), ..Default::default() }).unwrap().id;
+    let label = s.create_label(&b, CreateLabel { name: "urgent".into(), color: "#f00".into() }).unwrap();
+    s.create_automation(
+        &b,
+        CreateAutomation {
+            name: "Regle test".into(),
+            trigger: "card_moved".into(),
+            conditions: Some(serde_json::json!({ "to_list_id": l2, "label_id": label.id }).to_string()),
+            actions: Some(serde_json::json!([
+                { "type": "move", "list_id": l, "position": "top" },
+                { "type": "label", "label_id": label.id },
+                { "type": "comment", "text": "Vu le {{date}}" }
+            ]).to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let json = s.with_db(|conn| krello_core::exim::export_json(conn, &b)).unwrap();
+    let imported = import_krello(&s, &json).unwrap();
+
+    let autos = s.list_automations(&imported.id).unwrap();
+    assert_eq!(autos.len(), 1, "la règle doit être réimportée");
+    let a = &autos[0];
+    assert_eq!(a.name, "Regle test");
+    assert_eq!(a.trigger, "card_moved");
+    // ids remappés vers les nouvelles listes/labels
+    let lists_new = s.list_lists(&imported.id, false).unwrap();
+    let labels_new = s.list_labels(&imported.id).unwrap();
+    let l2_new = lists_new.iter().find(|x| x.title == "Terminé").unwrap().id.clone();
+    let l_new = lists_new.iter().find(|x| x.title == "À faire").unwrap().id.clone();
+    let label_new = labels_new.iter().find(|x| x.name == "urgent").unwrap().id.clone();
+    let conds: serde_json::Value = serde_json::from_str(&a.conditions).unwrap();
+    assert_eq!(conds["to_list_id"], l2_new);
+    assert_eq!(conds["label_id"], label_new);
+    let acts: Vec<serde_json::Value> = serde_json::from_str(&a.actions).unwrap();
+    assert_eq!(acts[0]["list_id"], l_new);
+    assert_eq!(acts[1]["label_id"], label_new);
+    assert_eq!(acts[2]["text"], "Vu le {{date}}");
+
+    // la règle importée fonctionne réellement sur le nouveau board
+    let c = make_card(&s, &l_new, "carte roundtrip");
+    s.attach_label(&c.id, &label_new).unwrap();
+    s.move_card(&c.id, MoveCard { list_id: Some(l2_new), ..Default::default() }).unwrap();
+    // action move -> la carte revient dans "À faire" (en haut) + label + commentaire
+    let got = s.get_card(&c.id).unwrap();
+    assert_eq!(got.list_id, l_new, "règle importée exécutée après remap");
+    let comments = s.list_comments(&c.id).unwrap();
+    assert!(comments.iter().any(|cm| cm.body.starts_with("Vu le")), "action comment de la règle importée");
+}

@@ -74,6 +74,13 @@ impl Db {
                 [],
             )?;
         }
+        if version < 3 {
+            self.conn.execute_batch(include_str!("../migrations/003_automations_v3.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '3')",
+                [],
+            )?;
+        }
 
         // Ensure the default calendar exists.
         self.conn.execute(

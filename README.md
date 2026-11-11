@@ -19,8 +19,10 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
   zoom jour/semaine/mois, drag pour replanifier.
 - **Calendrier** mensuel (drag pour replanifier), **Table** triable éditable,
   **Dashboard** (stats, graphiques, baselines, résumé IA).
-- **Automatisations** locales (Butler-like) : déclencheurs, conditions, actions,
-  sweep planifié.
+- **Automatisations** locales (Butler-like) : 13 déclencheurs, 15 actions dont
+  **cross-board** (copier/créer/déplacer vers un autre board), templates
+  `{{card.title}}`…, journal d'exécution — voir [`docs/AUTOMATIONS.md`](docs/AUTOMATIONS.md).
+  Sweep planifié chaque minute.
 - **Undo/redo ⌘Z** (100 opérations), **palette ⌘K**, thèmes clair/sombre,
   WebSocket temps réel, tout en français.
 - **Apple Intelligence** (macOS 15.1+, Apple Silicon) : carte/plan de projet en
