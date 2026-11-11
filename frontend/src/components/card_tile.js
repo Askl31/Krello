@@ -12,6 +12,7 @@ export function cardTileHtml(card) {
     .filter(Boolean);
   const pct = card._checklists ? progressPct(card._checklists) : null;
   const cover = card.cover ? safeCover(card.cover) : '';
+  const hasCover = !!cover;
   const milestone = card.is_milestone
     ? `<span class="badge" style="color:var(--warning);background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning)35%,transparent)">${icon('milestone', { size: 10 })} jalon</span>`
     : '';
@@ -27,7 +28,7 @@ export function cardTileHtml(card) {
   ].join('');
 
   return `
-    <div class="card-tile" data-card="${card.id}">
+    <div class="card-tile ${hasCover ? 'has-cover' : ''}" data-card="${card.id}">
       ${cover}
       <div class="title ${card.due_complete ? 'done' : ''}">${escapeHtml(card.title)}</div>
       <div class="meta">
@@ -46,7 +47,7 @@ export function cardTileHtml(card) {
 function safeCover(coverJson) {
   try {
     const c = JSON.parse(coverJson);
-    if (c.type === 'color') return `<div class="cover" style="background:${escapeHtml(c.value)}"></div>`;
+    if (c.type === 'color' && c.value) return `<div class="cover" style="background:${escapeHtml(c.value)}"></div>`;
     if (c.type === 'attachment' && c.value) {
       return `<img class="cover" src="/api/v1/attachments/${encodeURIComponent(c.value)}/download" alt="" loading="lazy" />`;
     }
