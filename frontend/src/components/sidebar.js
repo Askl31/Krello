@@ -11,6 +11,9 @@ import { icon } from '../icons.js';
 export function renderSidebar(host) {
   host.innerHTML = `
     <div class="brand">
+      <div class="sidebar-avatar" title="Espace de travail Krello">
+        <span class="avatar-glyph">👤</span>
+      </div>
       <div class="logo">K</div>
       <b>Krello</b>
     </div>

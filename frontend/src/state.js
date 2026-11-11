@@ -17,6 +17,7 @@ export const state = {
   view: 'board',      // board | calendar | timeline | table | dashboard
   filters: { text: '', labelId: null, priority: null, due: null, includeArchived: false },
   theme: localStorage.getItem('krello-theme') || 'auto',
+  style: localStorage.getItem('krello-style') || 'standard',
 };
 
 export function getResolvedTheme() {
@@ -26,6 +27,14 @@ export function getResolvedTheme() {
   return state.theme;
 }
 
+export function applyStyle() {
+  document.documentElement.dataset.style = state.style;
+  localStorage.setItem('krello-style', state.style);
+  if (state.board) {
+    applyBoardBackground(state.board.background);
+  }
+}
+
 export function applyTheme() {
   const resolved = getResolvedTheme();
   document.documentElement.dataset.theme = resolved;
@@ -33,6 +42,12 @@ export function applyTheme() {
   if (state.board) {
     applyBoardBackground(state.board.background);
   }
+}
+
+if (typeof window !== 'undefined') {
+  window.__krelloState = state;
+  window.__krelloApplyStyle = applyStyle;
+  window.__krelloApplyTheme = applyTheme;
 }
 
 // Détection dynamique du changement d'apparence système macOS
@@ -46,6 +61,7 @@ export function applyBoardBackground(bg) {
   const main = document.getElementById('main');
   if (!main) return;
   const isLight = document.documentElement.dataset.theme === 'light';
+  const isTranslucent = state.style === 'translucent';
 
   if (!bg) {
     main.style.background = '';
@@ -54,9 +70,9 @@ export function applyBoardBackground(bg) {
   try {
     const parsed = typeof bg === 'string' ? JSON.parse(bg) : bg;
     // Si c'est la valeur par défaut du backend (#101828) ou "default" :
-    // en mode clair, on ne force pas le fond sombre pour préserver le thème clair épuré
+    // en mode translucide ou clair, on laisse transparent pour laisser transparaître le fond aurore / studio
     if (parsed.value === '#101828' || parsed.type === 'default' || !parsed.value) {
-      main.style.background = isLight ? '' : '#101828';
+      main.style.background = (isTranslucent || isLight) ? '' : '#101828';
       return;
     }
     if (parsed.type === 'color' || parsed.type === 'gradient') {
@@ -67,7 +83,7 @@ export function applyBoardBackground(bg) {
 
   if (typeof bg === 'string') {
     if (bg === '#101828') {
-      main.style.background = isLight ? '' : '#101828';
+      main.style.background = (isTranslucent || isLight) ? '' : '#101828';
       return;
     }
     if (bg.startsWith('#') || bg.startsWith('linear-gradient')) {

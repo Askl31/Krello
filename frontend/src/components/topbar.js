@@ -20,6 +20,8 @@ const VIEWS = [
 export function renderTopbar(host) {
   const route = location.hash;
   const inBoard = state.board && route.includes(state.board.id);
+  const isTranslucent = state.style === 'translucent';
+
   host.innerHTML = `
     <button class="iconbtn" id="tb-boards" title="Afficher/masquer les boards">${icon('sidebar', { size: 16 })}</button>
     <div class="logo">K</div>
@@ -33,9 +35,15 @@ export function renderTopbar(host) {
             <span>${label}</span>
           </button>`).join('')}
       </div>
+      <button class="tb-search-pill" id="tb-search-pill" title="Rechercher (⌘K)">
+        ${icon('search', { size: 13 })}
+        <span>Rechercher…</span>
+        <kbd class="kbd">⌘K</kbd>
+      </button>
       ${state.aiStatus?.available ? `
-        <button class="iconbtn" id="tb-ai" title="Assistant IA Apple Intelligence (✨ / Raccourci N)">
-          ${icon('ai', { size: 16 })}
+        <button class="${isTranslucent ? 'ai-copilot-pill' : 'iconbtn'}" id="tb-ai" title="Assistant IA Apple Intelligence (✨ / Raccourci N)">
+          ${icon('ai', { size: isTranslucent ? 14 : 16 })}
+          ${isTranslucent ? '<span>AI Copilot</span>' : ''}
         </button>` : ''}
     ` : ''}
     <button class="iconbtn" id="tb-undo" title="Annuler (⌘Z)">${icon('undo', { size: 15 })}</button>
@@ -44,6 +52,10 @@ export function renderTopbar(host) {
       ${icon(getResolvedTheme() === 'dark' ? 'sun' : 'moon', { size: 15 })}
     </button>
   `;
+
+  host.querySelector('#tb-search-pill')?.addEventListener('click', () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+  });
 
   host.querySelector('#tb-boards')?.addEventListener('click', () => {
     const sb = document.querySelector('.sidebar');

@@ -23,6 +23,41 @@ export function renderBoard() {
   renderFilters();
   renderLists();
   initBoardKeyNav();
+  if (state.style === 'translucent') {
+    renderTranslucentCopilot();
+  } else {
+    document.querySelector('.translucent-copilot-card')?.remove();
+  }
+}
+
+function renderTranslucentCopilot() {
+  document.querySelector('.translucent-copilot-card')?.remove();
+  if (sessionStorage.getItem('krello-hide-copilot-widget') === '1') return;
+
+  const widget = document.createElement('div');
+  widget.className = 'translucent-copilot-card fade-in';
+  widget.innerHTML = `
+    <div class="copilot-card-icon">${icon('ai', { size: 18 })}</div>
+    <div class="copilot-card-content">
+      <div class="copilot-card-title">Assistant Krello</div>
+      <div class="copilot-card-desc">Ordonnancement à jour • Prêt à vous assister</div>
+    </div>
+    <button class="iconbtn copilot-card-close" title="Fermer" style="width:20px;height:20px;margin-left:auto">
+      ${icon('close', { size: 12 })}
+    </button>
+  `;
+
+  widget.querySelector('.copilot-card-close').onclick = (e) => {
+    e.stopPropagation();
+    sessionStorage.setItem('krello-hide-copilot-widget', '1');
+    widget.remove();
+  };
+
+  widget.onclick = () => {
+    import('../components/ai_panel.js').then((m) => m.initAiDrawer());
+  };
+
+  document.body.appendChild(widget);
 }
 
 function renderFilters() {
@@ -145,6 +180,7 @@ function listEl(list) {
 
   el.innerHTML = `
     <div class="list-head">
+      <span class="list-status-dot"></span>
       <h3 data-edit-list="${list.id}" title="Cliquez pour renommer">${escapeHtml(list.title)}</h3>
       <span class="count ${over ? 'wip-warn' : ''}" title="${list.wip_limit ? `Limite WIP: ${list.wip_limit}` : ''}">
         ${cards.length}${list.wip_limit ? `/${list.wip_limit}` : ''}

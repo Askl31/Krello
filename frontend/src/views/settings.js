@@ -2,7 +2,7 @@
 
 import { api } from '../api.js';
 import { escapeHtml, LABEL_COLORS } from '../format.js';
-import { state, applyTheme, loadBoard, loadBoards, applyBoardBackground } from '../state.js';
+import { state, applyTheme, applyStyle, loadBoard, loadBoards, applyBoardBackground } from '../state.js';
 import { toast, confirmDialog, promptDialog, openModal } from '../ui/modal.js';
 import { boardUrl, navigate } from '../router.js';
 import { icon } from '../icons.js';
@@ -47,6 +47,22 @@ export function renderSettings() {
           </button>
           <button data-theme="auto" class="${state.theme === 'auto' ? 'active' : ''}" style="flex:1;justify-content:center">
             ${icon('monitor', { size: 14 })} <span>Système</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="display:flex;align-items:center;gap:8px">
+          ${icon('layout', { size: 16, className: 'muted' })}
+          <span>Style d'interface</span>
+        </h3>
+        <p class="muted" style="margin:0 0 12px;font-size:12.5px">Basculez entre le design Standard et le design Translucide (Liquid Glass / visionOS).</p>
+        <div class="viewtabs" id="st-style-picker" style="width:100%;display:flex">
+          <button data-style="standard" class="${state.style === 'standard' ? 'active' : ''}" style="flex:1;justify-content:center">
+            ${icon('kanban', { size: 14 })} <span>Standard</span>
+          </button>
+          <button data-style="translucent" class="${state.style === 'translucent' ? 'active' : ''}" style="flex:1;justify-content:center">
+            ${icon('ai', { size: 14 })} <span>Translucide Liquid Glass</span>
           </button>
         </div>
       </div>
@@ -138,6 +154,23 @@ export function renderSettings() {
     const tb = document.getElementById('topbar');
     if (tb) {
       import('../components/topbar.js').then((m) => m.renderTopbar(tb));
+    }
+    renderSettings();
+  });
+
+  // --- Style (Standard vs Translucide Liquid Glass)
+  host.querySelector('#st-style-picker')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-style]');
+    if (!btn) return;
+    state.style = btn.dataset.style;
+    applyStyle();
+    const tb = document.getElementById('topbar');
+    if (tb) {
+      import('../components/topbar.js').then((m) => m.renderTopbar(tb));
+    }
+    const sb = document.getElementById('sidebar');
+    if (sb) {
+      import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
     }
     renderSettings();
   });

@@ -2,7 +2,7 @@
 
 import { api } from './api.js';
 import { startWs, on, emit } from './ws.js';
-import { state, applyTheme, applyBoardBackground, loadBoards, loadBoard, hydrateLabelIds } from './state.js';
+import { state, applyTheme, applyStyle, applyBoardBackground, loadBoards, loadBoard, hydrateLabelIds } from './state.js';
 import { startRouter, boardUrl, navigate } from './router.js';
 import { initPalette } from './ui/palette.js';
 import { initTopbarShortcuts, renderTopbar } from './components/topbar.js';
@@ -17,6 +17,7 @@ import { loadViewSettings } from './views/view_helpers.js';
 
 const app = document.getElementById('app');
 applyTheme();
+applyStyle();
 
 // Statut IA asynchrone (non bloquant au boot) : pilote l'affichage des boutons ✨.
 state.aiStatus = { available: false, reason: 'loading' };
