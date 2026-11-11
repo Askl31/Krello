@@ -16,6 +16,10 @@ export function renderTimeline() {
   const saved = state.settings.timeline || {};
   if (saved.zoom) zoom = saved.zoom;
   const host = document.querySelector('.view');
+  if (!host) return;
+  const prevScroller = host.querySelector('.gantt-scroll');
+  const prevScrollLeft = prevScroller?.scrollLeft;
+  const prevScrollTop = prevScroller?.scrollTop;
   const pxPerDay = ZOOMS[zoom];
 
   // ensemble de cartes avec dates
@@ -174,6 +178,12 @@ export function renderTimeline() {
         </div>
       </div>
     </div>`;
+
+  const newScroller = host.querySelector('.gantt-scroll');
+  if (newScroller) {
+    if (prevScrollLeft !== undefined) newScroller.scrollLeft = prevScrollLeft;
+    if (prevScrollTop !== undefined) newScroller.scrollTop = prevScrollTop;
+  }
 
   host.querySelector('#gantt-zoom').addEventListener('click', (e) => {
     zoom = e.target.closest('[data-zoom]')?.dataset.zoom || zoom;

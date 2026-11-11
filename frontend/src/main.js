@@ -41,6 +41,9 @@ function shellHtml() {
     </div>`;
 }
 
+let currentBoardId = null;
+let currentView = null;
+
 async function renderRoute() {
   try {
     const route = location.hash;
@@ -74,23 +77,49 @@ async function renderRoute() {
       const sb = document.getElementById('sidebar');
       if (sb) renderSidebar(sb);
       const main = document.getElementById('main');
-      main.innerHTML = '<div class="view"></div>';
-      switch (view) {
-        case 'calendar': renderCalendar(); break;
-        case 'timeline': renderTimeline(); break;
-        case 'table': renderTable(); break;
-        case 'dashboard': renderDashboard(); break;
-        default: renderBoard();
+      const isSameView = currentBoardId === boardId && currentView === view && main.querySelector('.view');
+      currentBoardId = boardId;
+      currentView = view;
+
+      if (!isSameView) {
+        main.innerHTML = '<div class="view view-enter"></div>';
+        switch (view) {
+          case 'calendar': renderCalendar(); break;
+          case 'timeline': renderTimeline(); break;
+          case 'table': renderTable(); break;
+          case 'dashboard': renderDashboard(); break;
+          default: renderBoard();
+        }
+      } else {
+        // Rafraîchissement doux sans détruire le conteneur .view (évite le flash de fenêtre)
+        switch (view) {
+          case 'calendar': renderCalendar(); break;
+          case 'timeline': renderTimeline(); break;
+          case 'table': renderTable(); break;
+          case 'dashboard': renderDashboard(); break;
+          default: {
+            if (document.querySelector('#board') && window.__krelloReloadBoard) {
+              window.__krelloReloadBoard();
+            } else {
+              renderBoard();
+            }
+            break;
+          }
+        }
       }
     } else if (route === '#/settings') {
+      currentBoardId = null;
+      currentView = 'settings';
       state.board = null;
       applyBoardBackground(null);
       renderTopbar(document.getElementById('topbar'));
       const sb = document.getElementById('sidebar');
       if (sb) renderSidebar(sb);
-      document.getElementById('main').innerHTML = '<div class="view"></div>';
+      document.getElementById('main').innerHTML = '<div class="view view-enter"></div>';
       renderSettings();
     } else {
+      currentBoardId = null;
+      currentView = 'home';
       // accueil
       state.board = null;
       applyBoardBackground(null);

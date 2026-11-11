@@ -30,15 +30,29 @@ export function toast(message, kind = '') {
 }
 
 export function openModal(html, { onClose, id, size = 'md' } = {}) {
-  // Une modale avec le même id remplace l'existante (évite l'empilement).
-  if (id) {
-    document.querySelectorAll(`.modal-backdrop[data-modal-id="${id}"]`).forEach((b) => b.remove());
+  // Une modale avec le même id réutilise l'élément existant au lieu de le détruire
+  // pour éviter tout flash / re-trigger des animations CSS.
+  let backdrop = id ? document.querySelector(`.modal-backdrop[data-modal-id="${id}"]`) : null;
+  let modalEl;
+  let isUpdate = false;
+
+  if (backdrop) {
+    isUpdate = true;
+    modalEl = backdrop.querySelector('.modal');
+    if (modalEl) {
+      modalEl.className = `modal modal-${size} modal-updating`;
+      modalEl.innerHTML = html;
+    }
+  } else {
+    backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    if (id) backdrop.dataset.modalId = id;
+    backdrop.innerHTML = `<div class="modal modal-${size}">${html}</div>`;
+    document.getElementById('overlays').appendChild(backdrop);
+    modalEl = backdrop.querySelector('.modal');
   }
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
-  if (id) backdrop.dataset.modalId = id;
-  backdrop.innerHTML = `<div class="modal modal-${size}">${html}</div>`;
-  document.getElementById('overlays').appendChild(backdrop);
+
+  backdrop.__krelloOnClose = onClose;
 
   const close = () => {
     backdrop.style.opacity = '0';
@@ -50,24 +64,26 @@ export function openModal(html, { onClose, id, size = 'md' } = {}) {
     }
     setTimeout(() => {
       backdrop.remove();
-      onClose?.();
+      backdrop.__krelloOnClose?.();
     }, 180);
   };
 
-  backdrop.addEventListener('pointerdown', (e) => {
-    if (e.target === backdrop) close();
-  });
+  if (!isUpdate) {
+    backdrop.addEventListener('pointerdown', (e) => {
+      if (e.target === backdrop) close();
+    });
+
+    const esc = (e) => {
+      if (e.key === 'Escape') {
+        close();
+        document.removeEventListener('keydown', esc);
+      }
+    };
+    document.addEventListener('keydown', esc);
+  }
+
   backdrop.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', close));
 
-  const esc = (e) => {
-    if (e.key === 'Escape') {
-      close();
-      document.removeEventListener('keydown', esc);
-    }
-  };
-  document.addEventListener('keydown', esc);
-
-  const modalEl = backdrop.querySelector('.modal');
   return { el: modalEl, close };
 }
 

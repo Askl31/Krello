@@ -79,5 +79,22 @@ export function attachCardTile(el, card, { onChange }) {
   });
 }
 
+export function updateCardTileInDOM(cardId, { onChange } = {}) {
+  const tile = document.querySelector(`.card-tile[data-card="${cardId}"]`);
+  if (!tile) return;
+  const card = state.cards.find((c) => c.id === cardId);
+  if (!card) return;
+  const temp = document.createElement('div');
+  temp.innerHTML = cardTileHtml(card);
+  const newTile = temp.firstElementChild;
+  if (!newTile) return;
+  if (tile.classList.contains('keyboard-focused')) {
+    newTile.classList.add('keyboard-focused');
+  }
+  attachCardTile(newTile, card, { onChange: onChange || window.__krelloReloadBoard });
+  tile.replaceWith(newTile);
+}
+
 let lastY = 0;
 window.addEventListener('pointermove', (e) => { lastY = e.clientY; });
+window.__krelloUpdateCardTile = updateCardTileInDOM;

@@ -12,6 +12,10 @@ let sortDir = 1;
 
 export function renderTable() {
   const host = document.querySelector('.view');
+  if (!host) return;
+  const prevScroller = host.querySelector('.tbl');
+  const prevScrollTop = prevScroller?.scrollTop;
+  const prevScrollLeft = prevScroller?.scrollLeft;
   const lists = visibleLists();
   const listById = (id) => lists.find((l) => l.id === id);
   const labelNames = (c) => (c._label_ids || []).map((id) => state.labels.find((l) => l.id === id)?.name).filter(Boolean).join(', ');
@@ -80,6 +84,12 @@ export function renderTable() {
         </tbody>
       </table>
     </div>`;
+
+  const newScroller = host.querySelector('.tbl');
+  if (newScroller) {
+    if (prevScrollTop !== undefined) newScroller.scrollTop = prevScrollTop;
+    if (prevScrollLeft !== undefined) newScroller.scrollLeft = prevScrollLeft;
+  }
 
   host.querySelectorAll('th[data-sort]').forEach((th) => {
     th.onclick = () => {

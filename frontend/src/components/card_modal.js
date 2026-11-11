@@ -18,9 +18,102 @@ export async function openCardModal(cardId, { onChange } = {}) {
   let comments = detail.comments || [];
   let attachments = detail.attachments || [];
   let fieldValues = detail.custom_fields || {};
-  const schedule = detail.schedule;
+  let schedule = detail.schedule;
 
   const notify = () => onChange?.();
+
+  function progressOf(cls) {
+    let total = 0, done = 0;
+    for (const cl of cls) {
+      for (const it of cl.items || []) {
+        total += 1;
+        if (it.checked) done += 1;
+      }
+    }
+    return total ? Math.round((done / total) * 100) : null;
+  }
+
+  function renderChecklistItems(cls) {
+    return cls.map((cl) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px">
+        <b style="font-size:13px">${escapeHtml(cl.title)}</b>
+        <button class="iconbtn" data-del-cl="${cl.id}" title="Supprimer la checklist" style="width:22px;height:22px">
+          ${icon('trash', { size: 13 })}
+        </button>
+      </div>
+      ${(cl.items || []).map((it) => `
+        <div class="checkline">
+          <input type="checkbox" data-item="${it.id}" ${it.checked ? 'checked' : ''} />
+          <span class="t ${it.checked ? 'done' : ''}">${escapeHtml(it.title)}</span>
+          <button class="iconbtn" data-del-item="${it.id}" title="Supprimer" style="width:20px;height:20px">
+            ${icon('close', { size: 12 })}
+          </button>
+        </div>`).join('')}
+      <button class="btn ghost sm" data-add-item="${cl.id}" style="margin-top:4px">
+        ${icon('plus', { size: 12 })} <span>Ajouter un élément</span>
+      </button>
+    `).join('');
+  }
+
+  function updateChecklistProgress(container, cls) {
+    const pct = progressOf(cls);
+    const badge = container.querySelector('#cm-checklists-badge');
+    const track = container.querySelector('#cm-checklists-track');
+    const fill = container.querySelector('#cm-checklists-fill');
+    if (pct !== null) {
+      if (badge) {
+        badge.textContent = `${pct}%`;
+        badge.style.display = '';
+      }
+      if (track) track.style.display = '';
+      if (fill) {
+        fill.style.width = `${pct}%`;
+        fill.classList.toggle('done', pct === 100);
+      }
+    } else {
+      if (badge) badge.style.display = 'none';
+      if (track) track.style.display = 'none';
+      if (fill) {
+        fill.style.width = '0%';
+        fill.classList.remove('done');
+      }
+    }
+  }
+
+  function renderComments(coms) {
+    return coms.map((c) => `
+      <div class="comment">
+        <div class="who">
+          <span>${fmtDateTime(c.created_at)}</span>
+          <button class="iconbtn" data-del-com="${c.id}" title="Supprimer" style="width:18px;height:18px">
+            ${icon('trash', { size: 11 })}
+          </button>
+        </div>
+        <div>${escapeHtml(c.body)}</div>
+      </div>`).join('') || '<div class="muted" style="font-size:12.5px;padding:6px 0">Aucun commentaire</div>';
+  }
+
+  function renderAttachments(atts) {
+    return atts.map((a) => `
+      <div class="row" style="margin-bottom:6px;padding:4px 6px;border-radius:var(--radius-xs);background:var(--surface-2)">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;font-size:12px">
+          📎 <a href="/api/v1/attachments/${a.id}/download" download>${escapeHtml(a.filename)}</a>
+        </span>
+        <button class="btn ghost sm" data-cover-att="${a.id}">cover</button>
+        <button class="iconbtn" data-del-att="${a.id}" title="Supprimer" style="width:20px;height:20px">
+          ${icon('close', { size: 12 })}
+        </button>
+      </div>`).join('');
+  }
+
+  function renderCpmSchedule(sched) {
+    if (!sched) return '<span class="muted" style="font-size:12px">Définissez des durées ou dépendances pour le calcul CPM</span>';
+    return `<div style="font-size:12px;background:var(--surface-2);padding:8px 10px;border-radius:var(--radius-sm)">
+      <div>Début au plus tôt : <b>${fmtDate(sched.es) || '—'}</b></div>
+      <div style="margin-top:3px">Fin au plus tard : <b>${fmtDate(sched.ef) || '—'}</b></div>
+      <div style="margin-top:3px">Marge totale : <b>${sched.total_float_days ?? '—'} j</b> ${sched.is_critical ? '<span class="badge overdue" style="margin-left:6px">chemin critique</span>' : ''}</div>
+    </div>`;
+  }
 
   function render() {
     const card = detail.card;
@@ -55,32 +148,16 @@ export async function openCardModal(cardId, { onChange } = {}) {
               </div>
             </div>
 
-            <div class="modal-section">
+            <div class="modal-section" id="cm-checklists-section">
               <div class="label" style="display:flex;justify-content:space-between;align-items:center">
                 <span>Checklists</span>
-                ${pct !== null ? `<span class="badge" style="color:var(--success)">${pct}%</span>` : ''}
+                <span id="cm-checklists-badge" class="badge" style="color:var(--success);${pct !== null ? '' : 'display:none'}">${pct ?? 0}%</span>
               </div>
-              ${pct !== null ? `<div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>` : ''}
+              <div id="cm-checklists-track" class="progress-track" style="${pct !== null ? '' : 'display:none'}">
+                <div id="cm-checklists-fill" class="progress-fill ${pct === 100 ? 'done' : ''}" style="width:${pct ?? 0}%"></div>
+              </div>
               <div id="cm-checklists">
-                ${checklists.map((cl) => `
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0 4px">
-                    <b style="font-size:13px">${escapeHtml(cl.title)}</b>
-                    <button class="iconbtn" data-del-cl="${cl.id}" title="Supprimer la checklist" style="width:22px;height:22px">
-                      ${icon('trash', { size: 13 })}
-                    </button>
-                  </div>
-                  ${cl.items.map((it) => `
-                    <div class="checkline">
-                      <input type="checkbox" data-item="${it.id}" ${it.checked ? 'checked' : ''} />
-                      <span class="t ${it.checked ? 'done' : ''}">${escapeHtml(it.title)}</span>
-                      <button class="iconbtn" data-del-item="${it.id}" title="Supprimer" style="width:20px;height:20px">
-                        ${icon('close', { size: 12 })}
-                      </button>
-                    </div>`).join('')}
-                  <button class="btn ghost sm" data-add-item="${cl.id}" style="margin-top:4px">
-                    ${icon('plus', { size: 12 })} <span>Ajouter un élément</span>
-                  </button>
-                `).join('')}
+                ${renderChecklistItems(checklists)}
               </div>
               <button class="btn ghost sm" id="cm-add-checklist" style="margin-top:8px">
                 ${icon('plus', { size: 13 })} <span>Nouvelle checklist</span>
@@ -94,16 +171,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
                 <button class="btn primary sm" id="cm-comment-add" style="flex:none">Envoyer</button>
               </div>
               <div id="cm-comments" style="margin-top:12px">
-                ${comments.map((c) => `
-                  <div class="comment">
-                    <div class="who">
-                      <span>${fmtDateTime(c.created_at)}</span>
-                      <button class="iconbtn" data-del-com="${c.id}" title="Supprimer" style="width:18px;height:18px">
-                        ${icon('trash', { size: 11 })}
-                      </button>
-                    </div>
-                    <div>${escapeHtml(c.body)}</div>
-                  </div>`).join('') || '<div class="muted" style="font-size:12.5px;padding:6px 0">Aucun commentaire</div>'}
+                ${renderComments(comments)}
               </div>
             </div>
           </div>
@@ -207,27 +275,15 @@ export async function openCardModal(cardId, { onChange } = {}) {
               <div class="label">Pièces jointes</div>
               <input type="file" id="cm-file" class="input" style="padding:6px;font-size:12px" />
               <div id="cm-attachments" style="margin-top:8px">
-                ${attachments.map((a) => `
-                  <div class="row" style="margin-bottom:6px;padding:4px 6px;border-radius:var(--radius-xs);background:var(--surface-2)">
-                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;font-size:12px">
-                      📎 <a href="/api/v1/attachments/${a.id}/download" download>${escapeHtml(a.filename)}</a>
-                    </span>
-                    <button class="btn ghost sm" data-cover-att="${a.id}">cover</button>
-                    <button class="iconbtn" data-del-att="${a.id}" title="Supprimer" style="width:20px;height:20px">
-                      ${icon('close', { size: 12 })}
-                    </button>
-                  </div>`).join('') || ''}
+                ${renderAttachments(attachments)}
               </div>
             </div>
 
             <div class="modal-section">
               <div class="label">Ordonnancement CPM</div>
-              ${schedule ? `
-                <div style="font-size:12px;background:var(--surface-2);padding:8px 10px;border-radius:var(--radius-sm)">
-                  <div>Début au plus tôt : <b>${fmtDate(schedule.es) || '—'}</b></div>
-                  <div style="margin-top:3px">Fin au plus tard : <b>${fmtDate(schedule.ef) || '—'}</b></div>
-                  <div style="margin-top:3px">Marge totale : <b>${schedule.total_float_days ?? '—'} j</b> ${schedule.is_critical ? '<span class="badge overdue" style="margin-left:6px">chemin critique</span>' : ''}</div>
-                </div>` : '<span class="muted" style="font-size:12px">Définissez des durées ou dépendances pour le calcul CPM</span>'}
+              <div id="cm-cpm-schedule">
+                ${renderCpmSchedule(schedule)}
+              </div>
               <button class="btn ghost sm" id="cm-add-dep" style="margin-top:8px">
                 ${icon('plus', { size: 12 })} <span>Ajouter une dépendance</span>
               </button>
@@ -286,34 +342,56 @@ export async function openCardModal(cardId, { onChange } = {}) {
     comments = d.comments || [];
     attachments = d.attachments || [];
     fieldValues = d.custom_fields || {};
+    schedule = d.schedule;
 
-    const descEl = current?.el.querySelector('#cm-desc');
-    const descEditing = descEl && descEl.style.display !== 'none' ? descEl.value : null;
-    const scroll = current?.el.scrollTop;
-    current = render();
-    if (descEditing !== null) {
-      const nv = current.el.querySelector('#cm-desc');
-      const view = current.el.querySelector('#cm-desc-view');
-      const actions = current.el.querySelector('#cm-desc-actions');
-      if (nv && view && actions) {
-        view.style.display = 'none';
-        nv.style.display = '';
-        actions.style.display = '';
-        nv.value = descEditing;
-        nv.focus();
+    const el = current?.el;
+    if (el && el.isConnected) {
+      // Mise à jour ciblée dans le DOM existant : zéro flash, focus et scroll conservés !
+      const titleEl = el.querySelector('[data-edit=title]');
+      if (titleEl) titleEl.textContent = detail.card.title;
+
+      const descEdit = el.querySelector('#cm-desc');
+      const isDescEditing = descEdit && descEdit.style.display !== 'none';
+      if (!isDescEditing) {
+        const descView = el.querySelector('#cm-desc-view');
+        if (descView) {
+          descView.innerHTML = mdToHtml(detail.card.description) || '<span class="muted">Cliquez pour ajouter une description…</span>';
+        }
       }
+
+      const clHost = el.querySelector('#cm-checklists');
+      if (clHost) clHost.innerHTML = renderChecklistItems(checklists);
+      updateChecklistProgress(el, checklists);
+
+      const comHost = el.querySelector('#cm-comments');
+      if (comHost) comHost.innerHTML = renderComments(comments);
+
+      const attHost = el.querySelector('#cm-attachments');
+      if (attHost) attHost.innerHTML = renderAttachments(attachments);
+
+      const depHost = el.querySelector('#cm-deps');
+      if (depHost) depHost.innerHTML = renderDeps(detail);
+
+      const cpmHost = el.querySelector('#cm-cpm-schedule');
+      if (cpmHost) cpmHost.innerHTML = renderCpmSchedule(detail.schedule);
+
+      const curCover = getCoverValue(detail.card.cover);
+      el.querySelectorAll('#cm-covers [data-cover]').forEach((btn) => {
+        btn.classList.toggle('sel', btn.dataset.cover === (curCover || ''));
+      });
+
+      const c = state.cards.find((c) => c.id === detail.card.id);
+      if (c) {
+        Object.assign(c, detail.card);
+        c._checklists = checklists;
+      }
+      if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(detail.card.id);
+    } else {
+      current = render();
     }
-    if (scroll) current.el.scrollTop = scroll;
-    notify();
   }
 
   let current = render();
-
-  function progressOf(cls) {
-    let total = 0, done = 0;
-    for (const cl of cls) for (const it of cl.items) { total += 1; if (it.checked) done += 1; }
-    return total ? Math.round((done / total) * 100) : null;
-  }
 
   function dateOnly(s) {
     const d = parseDate(s);
@@ -343,15 +421,23 @@ export async function openCardModal(cardId, { onChange } = {}) {
 
   function bind(el, close) {
     const card = detail.card;
+
     // --- titre inline
     const title = el.querySelector('[data-edit=title]');
     title.addEventListener('click', async () => {
       const nv = await promptDialog('Modifier le titre', card.title);
       if (nv && nv !== card.title) {
-        detail.card = await api.updateCard(card.id, { title: nv });
-        refreshData();
+        card.title = nv;
+        title.textContent = nv;
+        try {
+          detail.card = await api.updateCard(card.id, { title: nv });
+          const c = state.cards.find((c) => c.id === card.id);
+          if (c) c.title = nv;
+          if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+        } catch (err) { toast(err.message, 'err'); }
       }
     });
+
     // --- description
     const descView = el.querySelector('#cm-desc-view');
     const descEdit = el.querySelector('#cm-desc');
@@ -363,13 +449,34 @@ export async function openCardModal(cardId, { onChange } = {}) {
       descEdit.value = card.description;
       descEdit.focus();
     });
-    el.querySelector('#cm-desc-cancel').onclick = () => { render(); };
-    el.querySelector('#cm-desc-save').onclick = async () => {
-      detail.card = await api.updateCard(card.id, { description: descEdit.value });
-      refreshData();
+    el.querySelector('#cm-desc-cancel').onclick = () => {
+      descEdit.style.display = 'none';
+      descActions.style.display = 'none';
+      descView.style.display = '';
+      descView.innerHTML = mdToHtml(card.description) || '<span class="muted">Cliquez pour ajouter une description…</span>';
     };
+    el.querySelector('#cm-desc-save').onclick = async () => {
+      const nv = descEdit.value;
+      try {
+        detail.card = await api.updateCard(card.id, { description: nv });
+        card.description = nv;
+        descEdit.style.display = 'none';
+        descActions.style.display = 'none';
+        descView.style.display = '';
+        descView.innerHTML = mdToHtml(nv) || '<span class="muted">Cliquez pour ajouter une description…</span>';
+        const c = state.cards.find((c) => c.id === card.id);
+        if (c) c.description = nv;
+      } catch (err) { toast(err.message, 'err'); }
+    };
+
     // --- attributs
-    const upd = (patch) => api.updateCard(card.id, patch).then((c) => { detail.card = c; notify(); }).catch((e) => toast(e.message, 'err'));
+    const upd = (patch) => api.updateCard(card.id, patch).then((c) => {
+      detail.card = c;
+      const cardInState = state.cards.find((x) => x.id === card.id);
+      if (cardInState) Object.assign(cardInState, c);
+      if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+    }).catch((e) => toast(e.message, 'err'));
+
     el.querySelector('#cm-due')?.addEventListener('change', (e) => {
       const time = el.querySelector('#cm-due-time')?.value;
       upd({ due: e.target.value ? (e.target.value + (time ? `T${time}:00` : '')) : null });
@@ -385,15 +492,19 @@ export async function openCardModal(cardId, { onChange } = {}) {
     el.querySelector('#cm-work').onchange = (e) => upd({ work_hours: e.target.value === '' ? null : Number(e.target.value) });
     el.querySelector('#cm-pct').onchange = (e) => upd({ pct_complete: Number(e.target.value) });
     el.querySelector('#cm-milestone').onchange = (e) => upd({ is_milestone: e.target.checked });
+
     // --- labels
     el.querySelector('#cm-labels').addEventListener('change', async () => {
       const ids = [...el.querySelectorAll('[data-label]:checked')].map((c) => c.dataset.label);
       try {
         await api.setCardLabels(card.id, ids);
         detail.labels = ids.map((id) => state.labels.find((l) => l.id === id)).filter(Boolean);
-        notify();
+        const cardInState = state.cards.find((x) => x.id === card.id);
+        if (cardInState) cardInState._label_ids = ids;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
       } catch (e) { toast(e.message, 'err'); }
     });
+
     // --- champs personnalisés
     el.querySelectorAll('[data-field]').forEach((input) => {
       input.addEventListener('change', async () => {
@@ -406,67 +517,210 @@ export async function openCardModal(cardId, { onChange } = {}) {
         } catch (e) { toast(e.message, 'err'); }
       });
     });
+
     // --- couverture
     el.querySelector('#cm-covers').addEventListener('click', async (e) => {
       const c = e.target.closest('[data-cover]')?.dataset.cover;
       if (c === undefined) return;
-      await api.setCover(card.id, c || null);
-      refreshData();
+      try {
+        await api.setCover(card.id, c || null);
+        detail.card.cover = c ? JSON.stringify({ type: 'color', value: c }) : null;
+        card.cover = detail.card.cover;
+        el.querySelectorAll('#cm-covers [data-cover]').forEach((btn) => {
+          btn.classList.toggle('sel', btn.dataset.cover === (c || ''));
+        });
+        const cardInState = state.cards.find((x) => x.id === card.id);
+        if (cardInState) cardInState.cover = card.cover;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+      } catch (err) { toast(err.message, 'err'); }
     });
-    // --- checklists
+
+    // --- checklists : mise à jour ciblée et instantanée (aucun flash !)
     el.querySelector('#cm-add-checklist').onclick = async () => {
       const title = await promptDialog('Titre de la checklist', 'Étapes');
       if (!title) return;
-      await api.createChecklist(card.id, { title });
-      refreshData();
+      try {
+        const cl = await api.createChecklist(card.id, { title });
+        cl.items = [];
+        checklists.push(cl);
+        el.querySelector('#cm-checklists').innerHTML = renderChecklistItems(checklists);
+        updateChecklistProgress(el, checklists);
+        const c = state.cards.find((c) => c.id === card.id);
+        if (c) c._checklists = checklists;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+      } catch (err) { toast(err.message, 'err'); }
     };
+
     el.querySelector('#cm-checklists').addEventListener('click', async (e) => {
       const addBtn = e.target.closest('[data-add-item]');
       if (addBtn) {
         const t = await promptDialog('Nouvel élément');
-        if (t) { await api.createChecklistItem(addBtn.dataset.addItem, { title: t }); refreshData(); }
+        if (t) {
+          try {
+            const it = await api.createChecklistItem(addBtn.dataset.addItem, { title: t });
+            const cl = checklists.find((c) => c.id === addBtn.dataset.addItem);
+            if (cl) {
+              if (!cl.items) cl.items = [];
+              cl.items.push(it);
+            }
+            el.querySelector('#cm-checklists').innerHTML = renderChecklistItems(checklists);
+            updateChecklistProgress(el, checklists);
+            const c = state.cards.find((c) => c.id === card.id);
+            if (c) c._checklists = checklists;
+            if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+          } catch (err) { toast(err.message, 'err'); }
+        }
         return;
       }
+
       const delItem = e.target.closest('[data-del-item]');
-      if (delItem) { await api.deleteChecklistItem(delItem.dataset.delItem); refreshData(); return; }
+      if (delItem) {
+        const itemId = delItem.dataset.delItem;
+        try {
+          await api.deleteChecklistItem(itemId);
+          for (const cl of checklists) {
+            cl.items = (cl.items || []).filter((it) => it.id !== itemId);
+          }
+          el.querySelector('#cm-checklists').innerHTML = renderChecklistItems(checklists);
+          updateChecklistProgress(el, checklists);
+          const c = state.cards.find((c) => c.id === card.id);
+          if (c) c._checklists = checklists;
+          if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+        } catch (err) { toast(err.message, 'err'); }
+        return;
+      }
+
       const delCl = e.target.closest('[data-del-cl]');
       if (delCl) {
-        if (await confirmDialog('Supprimer cette checklist ?')) { await api.deleteChecklist(delCl.dataset.delCl); refreshData(); }
+        if (await confirmDialog('Supprimer cette checklist ?')) {
+          const clId = delCl.dataset.delCl;
+          try {
+            await api.deleteChecklist(clId);
+            checklists = checklists.filter((cl) => cl.id !== clId);
+            el.querySelector('#cm-checklists').innerHTML = renderChecklistItems(checklists);
+            updateChecklistProgress(el, checklists);
+            const c = state.cards.find((c) => c.id === card.id);
+            if (c) c._checklists = checklists;
+            if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+          } catch (err) { toast(err.message, 'err'); }
+        }
       }
     });
+
     el.querySelector('#cm-checklists').addEventListener('change', async (e) => {
       const cb = e.target.closest('[data-item]');
-      if (cb) { await api.updateChecklistItem(cb.dataset.item, { checked: cb.checked }); refreshData(); }
+      if (!cb) return;
+      const itemId = cb.dataset.item;
+      const isChecked = cb.checked;
+
+      // 1. Visuel immédiat et optimiste
+      const line = cb.closest('.checkline');
+      const textSpan = line?.querySelector('.t');
+      if (textSpan) textSpan.classList.toggle('done', isChecked);
+
+      // 2. État local
+      for (const cl of checklists) {
+        const it = (cl.items || []).find((i) => i.id === itemId);
+        if (it) {
+          it.checked = isChecked;
+          break;
+        }
+      }
+
+      // 3. Animation spring fluide de la barre de progression (aucun flash !)
+      updateChecklistProgress(el, checklists);
+
+      // 4. Synchronisation immédiate de la tuile sur le board
+      const c = state.cards.find((c) => c.id === card.id);
+      if (c) c._checklists = checklists;
+      if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+
+      // 5. Appel réseau en arrière-plan sans recharger la modale ni la fenêtre
+      try {
+        await api.updateChecklistItem(itemId, { checked: isChecked });
+      } catch (err) {
+        // Rollback propre si l'appel échoue
+        cb.checked = !isChecked;
+        if (textSpan) textSpan.classList.toggle('done', !isChecked);
+        for (const cl of checklists) {
+          const it = (cl.items || []).find((i) => i.id === itemId);
+          if (it) { it.checked = !isChecked; break; }
+        }
+        updateChecklistProgress(el, checklists);
+        if (c) c._checklists = checklists;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+        toast(`Erreur : ${err.message}`, 'err');
+      }
     });
+
     // --- commentaires
     const addComment = async () => {
       const input = el.querySelector('#cm-comment');
-      if (!input.value.trim()) return;
-      await api.addComment(card.id, input.value);
+      const body = input.value.trim();
+      if (!body) return;
       input.value = '';
-      refreshData();
+      try {
+        const nc = await api.addComment(card.id, body);
+        comments.unshift(nc);
+        el.querySelector('#cm-comments').innerHTML = renderComments(comments);
+        const c = state.cards.find((c) => c.id === card.id);
+        if (c) c._comments_count = comments.length;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+      } catch (err) { toast(err.message, 'err'); }
     };
     el.querySelector('#cm-comment-add').onclick = addComment;
     el.querySelector('#cm-comment').addEventListener('keydown', (e) => { if (e.key === 'Enter') addComment(); });
     el.querySelector('#cm-comments').addEventListener('click', async (e) => {
       const del = e.target.closest('[data-del-com]');
-      if (del) { await api.deleteComment(del.dataset.delCom); refreshData(); }
+      if (del) {
+        const cid = del.dataset.delCom;
+        try {
+          await api.deleteComment(cid);
+          comments = comments.filter((c) => c.id !== cid);
+          el.querySelector('#cm-comments').innerHTML = renderComments(comments);
+          const c = state.cards.find((c) => c.id === card.id);
+          if (c) c._comments_count = comments.length;
+          if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+        } catch (err) { toast(err.message, 'err'); }
+      }
     });
+
     // --- pièces jointes
     el.querySelector('#cm-file').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       try {
-        await api.uploadAttachment(card.id, file);
-        refreshData();
+        const att = await api.uploadAttachment(card.id, file);
+        attachments.push(att);
+        el.querySelector('#cm-attachments').innerHTML = renderAttachments(attachments);
+        const c = state.cards.find((c) => c.id === card.id);
+        if (c) c._attachments_count = attachments.length;
+        if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
       } catch (err) { toast(err.message, 'err'); }
     });
     el.querySelector('#cm-attachments').addEventListener('click', async (e) => {
       const del = e.target.closest('[data-del-att]');
-      if (del) { await api.deleteAttachment(del.dataset.delAtt); refreshData(); return; }
+      if (del) {
+        const aid = del.dataset.delAtt;
+        try {
+          await api.deleteAttachment(aid);
+          attachments = attachments.filter((a) => a.id !== aid);
+          el.querySelector('#cm-attachments').innerHTML = renderAttachments(attachments);
+          const c = state.cards.find((c) => c.id === card.id);
+          if (c) c._attachments_count = attachments.length;
+          if (window.__krelloUpdateCardTile) window.__krelloUpdateCardTile(card.id);
+        } catch (err) { toast(err.message, 'err'); }
+        return;
+      }
       const cov = e.target.closest('[data-cover-att]');
-      if (cov) { await api.setAttachmentCover(cov.dataset.coverAtt); refreshData(); }
+      if (cov) {
+        try {
+          await api.setAttachmentCover(cov.dataset.coverAtt);
+          refreshData();
+        } catch (err) { toast(err.message, 'err'); }
+      }
     });
+
     // --- dépendances
     el.querySelector('#cm-add-dep').onclick = async () => {
       if (!state.board) return;
@@ -481,8 +735,14 @@ export async function openCardModal(cardId, { onChange } = {}) {
     };
     el.querySelector('#cm-deps').addEventListener('click', async (e) => {
       const del = e.target.closest('[data-del-dep]');
-      if (del) { await api.deleteDep(del.dataset.delDep); refreshData(); }
+      if (del) {
+        try {
+          await api.deleteDep(del.dataset.delDep);
+          refreshData();
+        } catch (err) { toast(err.message, 'err'); }
+      }
     });
+
     // --- bas de modale
     el.querySelector('#cm-duplicate').onclick = async () => {
       await api.duplicateCard(card.id);
@@ -503,6 +763,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
         close(); notify();
       }
     };
+
     // --- modèle
     el.querySelector('#cm-make-template')?.addEventListener('click', async () => {
       if ((card.start || card.due) && !(await confirmDialog('Cette carte contient des dates : elles resteront sur le modèle mais ne seront jamais copiées vers les nouvelles cartes. Continuer ?'))) return;
@@ -559,6 +820,7 @@ export async function openCardModal(cardId, { onChange } = {}) {
       fm.el.querySelector('#ft-create').onclick = create;
       titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
     });
+
     // --- IA
     el.querySelector('#cm-ai')?.addEventListener('click', () => {
       const menu = openModal(`

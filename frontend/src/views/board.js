@@ -5,7 +5,7 @@ import { escapeHtml, PRIORITY_META } from '../format.js';
 import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
 import { draggable, activeDrag } from '../dnd.js';
 import { toast, promptDialog, openModal } from '../ui/modal.js';
-import { cardTileHtml, attachCardTile } from '../components/card_tile.js';
+import { cardTileHtml, attachCardTile, updateCardTileInDOM } from '../components/card_tile.js';
 import { openCardModal } from '../components/card_modal.js';
 import { icon } from '../icons.js';
 
@@ -114,11 +114,23 @@ function renderFilters() {
 }
 
 function renderLists() {
-  const board = host.querySelector('#board');
+  const board = host?.querySelector('#board');
+  if (!board) return;
+  const listScrolls = new Map();
+  board.querySelectorAll('.list-body').forEach((lb) => {
+    listScrolls.set(lb.dataset.body, lb.scrollTop);
+  });
+
   board.innerHTML = '';
 
   for (const list of visibleLists()) {
-    board.appendChild(listEl(list));
+    const el = listEl(list);
+    board.appendChild(el);
+    const prevScroll = listScrolls.get(list.id);
+    if (prevScroll) {
+      const lb = el.querySelector('.list-body');
+      if (lb) lb.scrollTop = prevScroll;
+    }
   }
 
   const addList = document.createElement('button');
@@ -474,9 +486,16 @@ function initBoardKeyNav() {
     else if (e.key === ' ') {
       e.preventDefault();
       const nv = !currentCard.due_complete;
-      await api.updateCard(currentCard.id, { due_complete: nv });
-      toast(nv ? '✓ Tâche terminée !' : 'Tâche marquée à faire', 'ok');
-      await reload();
+      currentCard.due_complete = nv;
+      updateCardTileInDOM(currentCard.id);
+      try {
+        await api.updateCard(currentCard.id, { due_complete: nv });
+        toast(nv ? '✓ Tâche terminée !' : 'Tâche marquée à faire', 'ok');
+      } catch (err) {
+        currentCard.due_complete = !nv;
+        updateCardTileInDOM(currentCard.id);
+        toast(err.message, 'err');
+      }
     }
     // 'e' : édition rapide du titre inline
     else if (key === 'e' && !e.metaKey && !e.ctrlKey) {
@@ -515,8 +534,17 @@ function quickEditTileTitle(cardId) {
     done = true;
     const nv = input.value.trim();
     if (save && nv && nv !== currentTitle) {
-      await api.updateCard(cardId, { title: nv });
-      await reload();
+      const card = state.cards.find((c) => c.id === cardId);
+      if (card) card.title = nv;
+      input.replaceWith(titleEl);
+      titleEl.textContent = nv;
+      try {
+        await api.updateCard(cardId, { title: nv });
+        updateCardTileInDOM(cardId);
+      } catch (err) {
+        toast(err.message, 'err');
+        await reload();
+      }
     } else {
       input.replaceWith(titleEl);
     }
@@ -580,8 +608,22 @@ export function openShortcutsDialog() {
 
 async function reload() {
   await refreshBoard();
-  renderBoard();
+  const scroller = host?.querySelector('.board-scroller');
+  const scrollLeft = scroller?.scrollLeft ?? 0;
+  const scrollTop = scroller?.scrollTop ?? 0;
+
+  if (host && host.querySelector('#board')) {
+    updateFilterBar();
+    renderLists();
+    if (scroller) {
+      scroller.scrollLeft = scrollLeft;
+      scroller.scrollTop = scrollTop;
+    }
+  } else {
+    renderBoard();
+  }
 }
+window.__krelloReloadBoard = reload;
 
 /** Déplacement de carte utilisé par le DnD (exposé au module card_tile). */
 window.__krelloMoveCard = async (cardId, move) => {
