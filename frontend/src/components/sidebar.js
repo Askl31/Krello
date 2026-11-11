@@ -19,7 +19,7 @@ export function renderSidebar(host) {
       <div class="sidebar-avatar" title="Espace de travail Krello">
         <span class="avatar-glyph">👤</span>
       </div>
-      <div class="logo" title="Krello">K</div>
+      <div class="logo" title="Krello">${icon('logo', { size: 26 })}</div>
       <b>Krello</b>
       <button class="iconbtn sb-collapse-btn" id="sb-collapse-btn" title="Réduire la barre latérale">
         ${icon('sidebar', { size: 14 })}

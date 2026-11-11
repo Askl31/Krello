@@ -15,6 +15,7 @@ import { renderTable } from './views/table.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderSettings } from './views/settings.js';
 import { loadViewSettings } from './views/view_helpers.js';
+import { icon } from './icons.js';
 
 const app = document.getElementById('app');
 applyTheme();
@@ -164,7 +165,7 @@ async function renderRoute() {
       }
       main.innerHTML = `
         <div class="empty-state">
-          <div class="boot-logo" style="width:64px;height:64px;border-radius:20px;font-size:30px;margin:0 auto 20px">K</div>
+          <div class="boot-logo" style="width:64px;height:64px;margin:0 auto 20px">${icon('logo', { size: 64 })}</div>
           <h2 style="margin:0 0 8px;font-size:20px;font-weight:700">Bienvenue dans Krello</h2>
           <p style="max-width:460px;margin:0 auto 20px;line-height:1.6">
             Gestionnaire de projets Kanban moderne avec Gantt/CPM, calendrier, automatisations et Apple Intelligence on-device.<br/>
@@ -185,7 +186,7 @@ async function renderRoute() {
     console.error('Erreur au chargement de Krello:', err);
     app.innerHTML = `
       <div class="boot" style="max-width: 440px; margin: 80px auto; padding: 32px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); text-align: center;">
-        <div class="boot-logo" style="width: 56px; height: 56px; margin: 0 auto 16px; font-size: 26px; border-radius: 16px; background: var(--accent-gradient); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800;">K</div>
+        <div class="boot-logo" style="width: 56px; height: 56px; margin: 0 auto 16px;">${icon('logo', { size: 56 })}</div>
         <h2 style="font-size: 18px; margin: 0 0 8px; font-weight: 700; color: var(--text-primary);">Connexion à Krello</h2>
         <p style="font-size: 13px; color: var(--text-secondary); margin: 0 0 20px; line-height: 1.5;">
           ${err.message || 'Impossible de joindre le serveur Krello.'}
@@ -196,7 +197,7 @@ async function renderRoute() {
         </div>
       </div>`;
     document.getElementById('btn-retry')?.addEventListener('click', () => {
-      app.innerHTML = '<div class="boot"><div class="boot-logo">K</div><p>Chargement de Krello…</p></div>';
+      app.innerHTML = `<div class="boot"><div class="boot-logo">${icon('logo', { size: 56 })}</div><p>Chargement de Krello…</p></div>`;
       renderRoute();
     });
     document.getElementById('btn-reload')?.addEventListener('click', () => location.reload());

@@ -24,7 +24,7 @@ export function renderTopbar(host) {
 
   host.innerHTML = `
     <button class="iconbtn" id="tb-boards" title="Réduire ou agrandir la barre latérale">${icon('sidebar', { size: 16 })}</button>
-    <div class="logo">K</div>
+    <div class="logo" title="Krello">${icon('logo', { size: 30 })}</div>
     <h1 ${inBoard ? 'id="tb-title" title="Cliquez pour renommer" style="cursor:pointer"' : ''}>${inBoard ? escapeHtml(state.board.title) : 'Krello'}</h1>
     <div class="spacer"></div>
     ${inBoard ? `

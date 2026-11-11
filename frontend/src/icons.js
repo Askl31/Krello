@@ -16,6 +16,31 @@ function renderIcon(name, size, className) {
   const cls = className ? `class="icon-svg ${className}"` : 'class="icon-svg"';
   const defs = {
     // Vues
+    logo: `<svg ${cls} width="${s}" height="${s}" viewBox="0 0 64 64" fill="none" style="display:block;border-radius:inherit">
+      <defs>
+        <linearGradient id="kl-bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1e2038"/>
+          <stop offset="100%" stop-color="#0a0d17"/>
+        </linearGradient>
+        <linearGradient id="kl-c1" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#818cf8"/>
+          <stop offset="100%" stop-color="#4f46e5"/>
+        </linearGradient>
+        <linearGradient id="kl-c2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38bdf8"/>
+          <stop offset="100%" stop-color="#0284c7"/>
+        </linearGradient>
+        <linearGradient id="kl-c3" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#34d399"/>
+          <stop offset="100%" stop-color="#059669"/>
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#kl-bg)"/>
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+      <rect x="14" y="21" width="10" height="26" rx="3" fill="url(#kl-c1)"/>
+      <rect x="27" y="16" width="10" height="34" rx="3" fill="url(#kl-c2)"/>
+      <rect x="40" y="25" width="10" height="18" rx="3" fill="url(#kl-c3)"/>
+    </svg>`,
     kanban: `<svg ${cls} width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1.5"/><rect x="10.5" y="3" width="5" height="12" rx="1.5"/><rect x="18" y="3" width="5" height="15" rx="1.5"/></svg>`,
     calendar: `<svg ${cls} width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`,
     timeline: `<svg ${cls} width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><rect x="7" y="4.5" width="8" height="3" rx="1.5" fill="currentColor"/><rect x="11" y="10.5" width="7" height="3" rx="1.5" fill="currentColor"/><rect x="5" y="16.5" width="6" height="3" rx="1.5" fill="currentColor"/></svg>`,

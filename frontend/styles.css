@@ -238,13 +238,10 @@ a:hover {
   height: 58px;
   margin: 0 auto 16px;
   border-radius: 18px;
-  background: linear-gradient(135deg, var(--c1) 0%, var(--c2) 100%);
+  background: transparent;
   display: grid;
   place-items: center;
-  font-size: 28px;
-  font-weight: 800;
-  color: #fff;
-  box-shadow: 0 10px 24px -4px color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: none;
   animation: logoPulse 2s infinite ease-in-out;
 }
 
@@ -313,14 +310,12 @@ a:hover {
   height: 30px;
   border-radius: 9px;
   flex: none;
-  background: linear-gradient(135deg, var(--c1) 0%, var(--c2) 100%);
+  background: transparent;
   display: grid;
   place-items: center;
-  font-weight: 800;
-  color: #fff;
-  font-size: 15px;
-  box-shadow: 0 3px 8px -1px color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: none;
   transition: transform var(--dur-fast) var(--ease-spring);
+  cursor: pointer;
 }
 
 .topbar .logo:hover {
@@ -449,12 +444,11 @@ a:hover {
   height: 26px;
   border-radius: 8px;
   flex: none;
-  background: linear-gradient(135deg, var(--c1) 0%, var(--c2) 100%);
+  background: transparent;
   display: grid;
   place-items: center;
-  font-weight: 800;
-  color: #fff;
-  font-size: 13.5px;
+  box-shadow: none;
+  transition: transform var(--dur-fast) var(--ease-spring);
 }
 
 .sidebar .brand b {
