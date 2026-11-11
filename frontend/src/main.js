@@ -88,6 +88,7 @@ async function renderRoute() {
           case 'timeline': renderTimeline(); break;
           case 'table': renderTable(); break;
           case 'dashboard': renderDashboard(); break;
+          case 'settings': renderSettings(); break;
           default: renderBoard();
         }
       } else {
@@ -97,6 +98,7 @@ async function renderRoute() {
           case 'timeline': renderTimeline(); break;
           case 'table': renderTable(); break;
           case 'dashboard': renderDashboard(); break;
+          case 'settings': renderSettings(); break;
           default: {
             if (document.querySelector('#board') && window.__krelloReloadBoard) {
               window.__krelloReloadBoard();
@@ -108,8 +110,17 @@ async function renderRoute() {
         }
       }
     } else if (route === '#/settings') {
+      if (state.board) {
+        navigate(boardUrl(state.board.id, 'settings'));
+        return;
+      }
+      if (state.boards.length > 0) {
+        navigate(boardUrl(state.boards[0].id, 'settings'));
+        return;
+      }
       currentBoardId = null;
       currentView = 'settings';
+      state.view = 'settings';
       state.board = null;
       applyBoardBackground(null);
       renderTopbar(document.getElementById('topbar'));

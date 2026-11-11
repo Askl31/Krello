@@ -69,7 +69,7 @@ export function renderSidebar(host) {
         ${icon('import', { size: 15 })}
         <span class="name">Importer…</span>
       </button>
-      <button class="item" id="sb-settings" title="Paramètres">
+      <button class="item ${state.view === 'settings' ? 'active' : ''}" id="sb-settings" title="Paramètres">
         ${icon('settings', { size: 15 })}
         <span class="name">Paramètres</span>
       </button>
@@ -105,7 +105,10 @@ export function renderSidebar(host) {
   }).join('') || `<div class="muted sb-no-board" style="padding:8px 12px;font-size:12.5px">Aucun board</div>`;
 
   boardList.querySelectorAll('[data-board]').forEach((b) => {
-    b.onclick = () => navigate(boardUrl(b.dataset.board, 'board'));
+    b.onclick = () => {
+      const targetView = state.view === 'settings' ? 'settings' : 'board';
+      navigate(boardUrl(b.dataset.board, targetView));
+    };
   });
 
   host.querySelectorAll('[data-rail-view]').forEach((b) => {
@@ -137,7 +140,15 @@ export function renderSidebar(host) {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
   };
 
-  host.querySelector('#sb-settings').onclick = () => { location.hash = '#/settings'; };
+  host.querySelector('#sb-settings').onclick = () => {
+    if (state.board) {
+      navigate(boardUrl(state.board.id, 'settings'));
+    } else if (state.boards.length > 0) {
+      navigate(boardUrl(state.boards[0].id, 'settings'));
+    } else {
+      location.hash = '#/settings';
+    }
+  };
 
   host.querySelector('#sb-import').onclick = () => showImportDialog();
 }

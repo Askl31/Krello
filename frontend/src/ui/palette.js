@@ -123,7 +123,8 @@ function openPalette() {
       {
         icon: icon('settings', { size: 15 }),
         title: 'Paramètres',
-        run: () => navigate('#/settings'),
+        sub: 'Préférences & Configuration',
+        run: () => navigate(state.board ? boardUrl(state.board.id, 'settings') : '#/settings'),
       },
     );
 

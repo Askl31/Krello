@@ -629,6 +629,12 @@ a:hover {
   border-radius: 12px;
 }
 
+.sidebar.collapsed .item.active {
+  box-shadow: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
 .sidebar.collapsed .item .name,
 .sidebar.collapsed .item .count {
   display: none;
@@ -2927,5 +2933,27 @@ html[data-style="translucent"][data-theme="dark"] .modal {
   background: rgba(20, 27, 45, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Panneaux des Paramètres en mode Translucide */
+html[data-style="translucent"] .settings-grid .panel,
+html[data-style="translucent"] .panel {
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+html[data-style="translucent"][data-theme="light"] .settings-grid .panel,
+html[data-style="translucent"][data-theme="light"] .panel {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.04), inset 0 1px 0 #ffffff;
+}
+
+html[data-style="translucent"][data-theme="dark"] .settings-grid .panel,
+html[data-style="translucent"][data-theme="dark"] .panel {
+  background: rgba(30, 41, 59, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 

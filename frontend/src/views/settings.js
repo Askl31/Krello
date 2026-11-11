@@ -30,7 +30,10 @@ export function renderSettings() {
   const board = state.board;
 
   host.innerHTML = `
-    <h2 style="margin-top:0">Paramètres de l'application</h2>
+    <div class="view-head" style="margin-bottom:18px">
+      <h2 style="margin:0;font-size:20px;font-weight:700">Paramètres</h2>
+      <p class="muted" style="margin:4px 0 0;font-size:13px">Préférences d'affichage et configuration ${board ? `du board « ${escapeHtml(board.title)} »` : 'générale'}.</p>
+    </div>
     <div class="settings-grid">
       <div class="panel">
         <h3 style="display:flex;align-items:center;gap:8px">
@@ -155,6 +158,10 @@ export function renderSettings() {
     if (tb) {
       import('../components/topbar.js').then((m) => m.renderTopbar(tb));
     }
+    const sb = document.getElementById('sidebar');
+    if (sb) {
+      import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
+    }
     renderSettings();
   });
 
@@ -193,6 +200,10 @@ export function renderSettings() {
     try {
       await api.updateBoard(boardId, { background: bg });
       await loadBoard(boardId);
+      const sb = document.getElementById('sidebar');
+      if (sb) {
+        import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
+      }
       renderSettings();
       toast('Ambiance du board modifiée', 'ok');
     } catch (err) { toast(err.message, 'err'); }
