@@ -40,6 +40,9 @@ export function renderTopbar(host) {
         <span>Rechercher…</span>
         <kbd class="kbd">⌘K</kbd>
       </button>
+      <button class="iconbtn" id="tb-board-settings" title="Paramètres du tableau (Ambiance, planning, labels, champs, règles…)">
+        ${icon('settings', { size: 15 })}
+      </button>
       ${state.aiStatus?.available ? `
         <button class="${isTranslucent ? 'ai-copilot-pill' : 'iconbtn'}" id="tb-ai" title="Assistant IA Apple Intelligence (✨ / Raccourci N)">
           ${icon('ai', { size: isTranslucent ? 14 : 16 })}
@@ -81,6 +84,12 @@ export function renderTopbar(host) {
   host.querySelector('#tb-views')?.addEventListener('click', (e) => {
     const v = e.target.closest('[data-view]')?.dataset.view;
     if (v) navigate(boardUrl(state.board.id, v));
+  });
+
+  host.querySelector('#tb-board-settings')?.addEventListener('click', () => {
+    if (state.board) {
+      import('./board_settings_modal.js').then((m) => m.openBoardSettingsModal(state.board.id));
+    }
   });
 
   host.querySelector('#tb-ai')?.addEventListener('click', () => initAiDrawer());

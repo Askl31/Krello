@@ -116,7 +116,12 @@ async function renderRoute() {
           case 'timeline': renderTimeline(); break;
           case 'table': renderTable(); break;
           case 'dashboard': renderDashboard(); break;
-          case 'settings': renderSettings(); break;
+          case 'settings': {
+            renderBoard();
+            import('./components/board_settings_modal.js').then((m) => m.openBoardSettingsModal(boardId));
+            history.replaceState(null, '', location.pathname + location.search + boardUrl(boardId, 'board'));
+            break;
+          }
           default: renderBoard();
         }
       } else {
@@ -126,7 +131,11 @@ async function renderRoute() {
           case 'timeline': renderTimeline(); break;
           case 'table': renderTable(); break;
           case 'dashboard': renderDashboard(); break;
-          case 'settings': renderSettings(); break;
+          case 'settings': {
+            import('./components/board_settings_modal.js').then((m) => m.openBoardSettingsModal(boardId));
+            history.replaceState(null, '', location.pathname + location.search + boardUrl(boardId, 'board'));
+            break;
+          }
           default: {
             if (document.querySelector('#board') && window.__krelloReloadBoard) {
               window.__krelloReloadBoard({ refetch: false });
@@ -148,19 +157,10 @@ async function renderRoute() {
         openCardModal(deepCardId);
         history.replaceState(null, '', location.pathname + location.search + `#/b/${boardId}/${view || 'board'}`);
       }
-    } else if (route === '#/settings') {
-      if (state.board) {
-        navigate(boardUrl(state.board.id, 'settings'));
-        return;
-      }
-      if (state.boards.length > 0) {
-        navigate(boardUrl(state.boards[0].id, 'settings'));
-        return;
-      }
+    } else if (route === '#/settings' || route.startsWith('#/settings')) {
       currentBoardId = null;
       currentView = 'settings';
       state.view = 'settings';
-      state.board = null;
       applyBoardBackground(null);
       renderTopbar(document.getElementById('topbar'));
       const sb = document.getElementById('sidebar');

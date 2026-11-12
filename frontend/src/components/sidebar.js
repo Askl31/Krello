@@ -120,16 +120,26 @@ export function renderSidebar(host) {
           <span class="name">${escapeHtml(b.title)}</span>
           ${count !== null ? `<span class="count">${count}</span>` : ''}
         </button>
-        <button class="iconbtn sb-board-del" data-del-board="${b.id}" title="Supprimer le board « ${escapeHtml(b.title)} »">
-          ${icon('trash', { size: 13 })}
-        </button>
+        <div class="sb-board-actions">
+          <button class="iconbtn sb-board-settings" data-settings-board="${b.id}" title="Paramètres du tableau « ${escapeHtml(b.title)} »">
+            ${icon('settings', { size: 12 })}
+          </button>
+          <button class="iconbtn sb-board-del" data-del-board="${b.id}" title="Supprimer le tableau « ${escapeHtml(b.title)} »">
+            ${icon('trash', { size: 12 })}
+          </button>
+        </div>
       </div>`;
   }).join('') || `<div class="muted sb-no-board" style="padding:8px 12px;font-size:12.5px">Aucun board</div>`;
 
   boardList.querySelectorAll('[data-board]').forEach((b) => {
     b.onclick = () => {
-      const targetView = state.view === 'settings' ? 'settings' : 'board';
-      navigate(boardUrl(b.dataset.board, targetView));
+      navigate(boardUrl(b.dataset.board, 'board'));
+    };
+  });
+  boardList.querySelectorAll('[data-settings-board]').forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      import('./board_settings_modal.js').then((m) => m.openBoardSettingsModal(b.dataset.settingsBoard));
     };
   });
   boardList.querySelectorAll('[data-del-board]').forEach((b) => {
@@ -200,13 +210,7 @@ export function renderSidebar(host) {
   };
 
   host.querySelector('#sb-settings').onclick = () => {
-    if (state.board) {
-      navigate(boardUrl(state.board.id, 'settings'));
-    } else if (state.boards.length > 0) {
-      navigate(boardUrl(state.boards[0].id, 'settings'));
-    } else {
-      location.hash = '#/settings';
-    }
+    navigate('#/settings');
   };
 
   host.querySelector('#sb-import').onclick = () => showImportDialog();

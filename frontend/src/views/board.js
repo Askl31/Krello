@@ -109,6 +109,9 @@ function renderFilters() {
     <button class="iconbtn" id="f-del-view" title="Supprimer la vue sélectionnée" style="${currentSavedView ? '' : 'display:none'}">${icon('trash', { size: 12 })}</button>
     <button class="iconbtn" id="f-help" title="Raccourcis clavier (?)">
       <span class="kbd" style="font-size:10.5px">?</span>
+    </button>
+    <button class="iconbtn" id="f-board-settings" title="Paramètres du tableau (Ambiance, planning, labels, champs, règles…)">
+      ${icon('settings', { size: 13 })}
     </button>`;
 
   let filterTimer = null;
@@ -129,6 +132,11 @@ function renderFilters() {
     renderLists();
   });
   bar.querySelector('#f-help')?.addEventListener('click', () => openShortcutsDialog());
+  bar.querySelector('#f-board-settings')?.addEventListener('click', () => {
+    if (state.board) {
+      import('../components/board_settings_modal.js').then((m) => m.openBoardSettingsModal(state.board.id));
+    }
+  });
 
   // Vues de filtres enregistrées (persistées dans les réglages du board).
   bar.querySelector('#f-saved')?.addEventListener('change', (e) => {

@@ -124,11 +124,23 @@ function openPalette() {
       },
       {
         icon: icon('settings', { size: 15 }),
-        title: 'Paramètres',
-        sub: 'Préférences & Configuration',
-        run: () => navigate(state.board ? boardUrl(state.board.id, 'settings') : '#/settings'),
+        title: 'Paramètres généraux',
+        sub: 'Apparence, sauvegardes, calendriers…',
+        run: () => navigate('#/settings'),
       },
     );
+
+    if (state.board) {
+      items.push({
+        icon: icon('kanban', { size: 15 }),
+        title: `Paramètres du tableau « ${state.board.title} »`,
+        sub: 'Ambiance, planning CPM, labels, champs, règles…',
+        run: async () => {
+          const m = await import('../components/board_settings_modal.js');
+          m.openBoardSettingsModal(state.board.id);
+        },
+      });
+    }
 
     const viewDefs = [
       ['board', 'Vue Kanban', 'kanban'],

@@ -751,20 +751,53 @@ a:hover {
 }
 
 .sb-board-row { position: relative; }
-.sb-board-row .sb-board-del {
+.sb-board-row .item {
+  padding-right: 58px;
+}
+.sb-board-row .sb-board-actions {
   position: absolute;
   right: 6px;
   top: 50%;
   transform: translateY(-50%);
   opacity: 0;
   transition: opacity .12s ease;
-  width: 24px;
-  height: 24px;
-  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  z-index: 2;
+  pointer-events: none;
 }
-.sb-board-row:hover .sb-board-del { opacity: 1; }
+.sb-board-row:hover .sb-board-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.sb-board-row .sb-board-actions .iconbtn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  box-shadow: var(--shadow-xs);
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.sb-board-row .sb-board-actions .iconbtn:hover {
+  background: var(--surface-hover);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.sb-board-row .sb-board-actions .sb-board-del:hover {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+  background: var(--error-soft);
+}
 .sb-board-row:hover .item .count { visibility: hidden; }
-.sidebar.collapsed .sb-board-row .sb-board-del { display: none; }
+.sidebar.collapsed .sb-board-row .sb-board-actions { display: none; }
 
 .sidebar.collapsed .sb-no-board {
   display: none;
@@ -3134,6 +3167,63 @@ table.grid tr.done td:nth-child(2) {
   color: var(--error) !important;
 }
 
+/* Bannière d'accès aux paramètres des tableaux depuis les paramètres généraux */
+.settings-board-info-banner {
+  margin-bottom: 22px;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  box-shadow: var(--shadow-xs);
+}
+
+/* Cartes de la fenêtre de paramètres dédiée au tableau */
+.board-settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-xs);
+}
+
+.board-settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+}
+
+.board-settings-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--fg);
+  margin: 0;
+}
+
+.board-settings-card-desc {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 3px 0 0;
+  line-height: 1.45;
+}
+
+.board-modal-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
 /* Ancienne grille pour compatibilité */
 .settings-grid {
   display: grid;
@@ -3792,4 +3882,19 @@ html[data-style="translucent"][data-theme="dark"] .settings-card {
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
+
+html[data-style="translucent"] .board-settings-card {
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+html[data-style="translucent"][data-theme="light"] .board-settings-card {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+}
+html[data-style="translucent"][data-theme="dark"] .board-settings-card {
+  background: rgba(30, 41, 59, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
 
