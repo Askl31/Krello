@@ -18,6 +18,7 @@ export const state = {
   filters: { text: '', labelId: null, priority: null, due: null, includeArchived: false },
   theme: localStorage.getItem('krello-theme') || 'auto',
   style: localStorage.getItem('krello-style') || 'standard',
+  settingsTab: 'appearance',
 };
 
 export function getResolvedTheme() {
@@ -27,20 +28,55 @@ export function getResolvedTheme() {
   return state.theme;
 }
 
-export function applyStyle() {
+export function applyStyle(persistBackend = false) {
   document.documentElement.dataset.style = state.style;
-  localStorage.setItem('krello-style', state.style);
+  try {
+    localStorage.setItem('krello-style', state.style);
+  } catch { /* ignore */ }
+  if (persistBackend) {
+    api.saveUiSettings({ style: state.style }).catch(() => {});
+  }
   if (state.board) {
     applyBoardBackground(state.board.background);
   }
 }
 
-export function applyTheme() {
+export function applyTheme(persistBackend = false) {
   const resolved = getResolvedTheme();
   document.documentElement.dataset.theme = resolved;
-  localStorage.setItem('krello-theme', state.theme);
+  try {
+    localStorage.setItem('krello-theme', state.theme);
+  } catch { /* ignore */ }
+  if (persistBackend) {
+    api.saveUiSettings({ theme: state.theme }).catch(() => {});
+  }
   if (state.board) {
     applyBoardBackground(state.board.background);
+  }
+}
+
+export async function initUiSettings() {
+  try {
+    const res = await api.uiSettings();
+    let themeChanged = false;
+    let styleChanged = false;
+    if (res.theme && res.theme !== state.theme) {
+      state.theme = res.theme;
+      try { localStorage.setItem('krello-theme', state.theme); } catch { /* ignore */ }
+      themeChanged = true;
+    }
+    if (res.style && res.style !== state.style) {
+      state.style = res.style;
+      try { localStorage.setItem('krello-style', state.style); } catch { /* ignore */ }
+      styleChanged = true;
+    }
+    if (res.sidebar_collapsed != null && localStorage.getItem('krello-sidebar-collapsed') == null) {
+      try { localStorage.setItem('krello-sidebar-collapsed', res.sidebar_collapsed ? 'true' : 'false'); } catch { /* ignore */ }
+    }
+    if (themeChanged) applyTheme(false);
+    if (styleChanged) applyStyle(false);
+  } catch {
+    // Mode hors-ligne / fallback local
   }
 }
 

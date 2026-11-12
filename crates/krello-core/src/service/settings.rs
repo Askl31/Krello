@@ -20,10 +20,22 @@ pub const BACKUP_KEEP_KEY: &str = "backup_keep";
 pub const LAST_BACKUP_AT_KEY: &str = "last_backup_at";
 pub const LAST_BACKUP_FILE_KEY: &str = "last_backup_file";
 
+pub const UI_THEME_KEY: &str = "ui_theme";
+pub const UI_STYLE_KEY: &str = "ui_style";
+pub const UI_SIDEBAR_COLLAPSED_KEY: &str = "ui_sidebar_collapsed";
+
 pub const DEFAULT_INTERVAL_HOURS: i64 = 24;
 pub const DEFAULT_KEEP: i64 = 10;
 const MAX_INTERVAL_HOURS: i64 = 24 * 30;
 const MAX_KEEP: i64 = 100;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct UiSettings {
+    pub theme: String,
+    pub style: String,
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BackupSettings {
@@ -96,6 +108,52 @@ impl Service {
             }
         }
         self.backup_settings()
+    }
+
+    /// App-level UI preferences (theme, visual style, sidebar collapsed state).
+    pub fn ui_settings(&self) -> Result<UiSettings> {
+        let db = self.lock_db()?;
+        let theme = db.meta_get(UI_THEME_KEY)?.unwrap_or_else(|| "auto".into());
+        let style = db.meta_get(UI_STYLE_KEY)?.unwrap_or_else(|| "standard".into());
+        let sidebar_collapsed = db
+            .meta_get(UI_SIDEBAR_COLLAPSED_KEY)?
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+        Ok(UiSettings {
+            theme,
+            style,
+            sidebar_collapsed,
+        })
+    }
+
+    /// Update app-level UI preferences in SQLite `meta` table.
+    pub fn set_ui_settings(
+        &self,
+        theme: Option<String>,
+        style: Option<String>,
+        sidebar_collapsed: Option<bool>,
+    ) -> Result<UiSettings> {
+        {
+            let db = self.lock_db()?;
+            if let Some(t) = theme {
+                let valid = match t.as_str() {
+                    "light" | "dark" | "auto" => t,
+                    _ => "auto".into(),
+                };
+                db.meta_set(UI_THEME_KEY, &valid)?;
+            }
+            if let Some(s) = style {
+                let valid = match s.as_str() {
+                    "translucent" | "standard" => s,
+                    _ => "standard".into(),
+                };
+                db.meta_set(UI_STYLE_KEY, &valid)?;
+            }
+            if let Some(sc) = sidebar_collapsed {
+                db.meta_set(UI_SIDEBAR_COLLAPSED_KEY, if sc { "true" } else { "false" })?;
+            }
+        }
+        self.ui_settings()
     }
 
     /// Run a backup right now into the configured directory. Returns its path.

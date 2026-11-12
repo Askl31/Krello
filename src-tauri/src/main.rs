@@ -71,9 +71,14 @@ fn main() {
             let service_server = Arc::clone(&service);
             let service_sweep = Arc::clone(&service);
             tauri::async_runtime::spawn(async move {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                    .await
-                    .expect("bind 127.0.0.1:0");
+                // Tente de se lier au port standard 8890 pour préserver l'origine
+                // et le localStorage entre lancements, avec repli éphémère si occupé.
+                let listener = match tokio::net::TcpListener::bind("127.0.0.1:8890").await {
+                    Ok(l) => l,
+                    Err(_) => tokio::net::TcpListener::bind("127.0.0.1:0")
+                        .await
+                        .expect("bind 127.0.0.1:0"),
+                };
                 let port = listener.local_addr().unwrap().port();
                 let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse().unwrap();
 

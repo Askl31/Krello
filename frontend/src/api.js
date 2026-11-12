@@ -117,6 +117,9 @@ export const api = {
   updateCalendar: (id, p) => api.patch(`/api/v1/calendars/${id}`, p),
   deleteCalendar: (id) => api.del(`/api/v1/calendars/${id}`),
 
+  uiSettings: () => api.get('/api/v1/settings/ui'),
+  saveUiSettings: (s) => api.put('/api/v1/settings/ui', s),
+
   backupSettings: () => api.get('/api/v1/settings/backup'),
   saveBackupSettings: (s) => api.put('/api/v1/settings/backup', s),
   runBackup: () => api.post('/api/v1/settings/backup/run'),

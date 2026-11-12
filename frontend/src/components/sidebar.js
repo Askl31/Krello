@@ -164,6 +164,7 @@ export function renderSidebar(host) {
     host.classList.toggle('collapsed');
     const collapsed = host.classList.contains('collapsed');
     localStorage.setItem('krello-sidebar-collapsed', collapsed ? 'true' : 'false');
+    api.saveUiSettings({ sidebar_collapsed: collapsed }).catch(() => {});
   };
 
   const toggleBoards = (e) => {

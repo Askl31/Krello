@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Krello</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <script>
+    try {
+      var t = localStorage.getItem('krello-theme') || 'auto';
+      var resolved = t === 'auto' ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : t;
+      document.documentElement.dataset.theme = resolved;
+      var s = localStorage.getItem('krello-style') || 'standard';
+      document.documentElement.dataset.style = s;
+    } catch (e) {}
+  </script>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>

@@ -61,7 +61,9 @@ export function renderTopbar(host) {
     const sb = document.querySelector('.sidebar');
     if (sb) {
       sb.classList.toggle('collapsed');
-      localStorage.setItem('krello-sidebar-collapsed', sb.classList.contains('collapsed') ? 'true' : 'false');
+      const collapsed = sb.classList.contains('collapsed');
+      localStorage.setItem('krello-sidebar-collapsed', collapsed ? 'true' : 'false');
+      api.saveUiSettings({ sidebar_collapsed: collapsed }).catch(() => {});
     }
   });
 
@@ -87,7 +89,7 @@ export function renderTopbar(host) {
   host.querySelector('#tb-theme')?.addEventListener('click', () => {
     const current = getResolvedTheme();
     state.theme = current === 'dark' ? 'light' : 'dark';
-    applyTheme();
+    applyTheme(true);
     renderTopbar(host);
     const route = location.hash;
     if (route.includes('/timeline')) {

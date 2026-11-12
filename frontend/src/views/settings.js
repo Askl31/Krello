@@ -474,241 +474,493 @@ function actionParamsHtml(type, val, ctx) {
 
 export function renderSettings() {
   const host = document.querySelector('.view');
+  if (!host) return;
   const board = state.board;
+  const tab = state.settingsTab || 'appearance';
 
-  host.innerHTML = `
-    <div class="view-head" style="margin-bottom:18px">
-      <h2 style="margin:0;font-size:20px;font-weight:700">Paramètres</h2>
-      <p class="muted" style="margin:4px 0 0;font-size:13px">Préférences d'affichage et configuration ${board ? `du board « ${escapeHtml(board.title)} »` : 'générale'}.</p>
-    </div>
-    <div class="settings-grid">
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('theme', { size: 16, className: 'muted' })}
-          <span>Apparence & Thème</span>
-        </h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12.5px">Choisissez le mode d'affichage de Krello selon votre environnement.</p>
-        <div class="viewtabs" id="st-theme-picker" style="width:100%;display:flex">
-          <button data-theme="dark" class="${state.theme === 'dark' ? 'active' : ''}" style="flex:1;justify-content:center">
-            ${icon('moon', { size: 14 })} <span>Sombre</span>
-          </button>
-          <button data-theme="light" class="${state.theme === 'light' ? 'active' : ''}" style="flex:1;justify-content:center">
-            ${icon('sun', { size: 14 })} <span>Clair</span>
-          </button>
-          <button data-theme="auto" class="${state.theme === 'auto' ? 'active' : ''}" style="flex:1;justify-content:center">
-            ${icon('monitor', { size: 14 })} <span>Système</span>
-          </button>
+  let tabContentHtml = '';
+
+  if (tab === 'appearance') {
+    tabContentHtml = `
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('theme', { size: 18, className: 'muted' })} <span>Mode d'affichage</span></h3>
+            <p class="settings-card-desc">Choisissez l'apparence générale de Krello ou synchronisez-la automatiquement avec macOS.</p>
+          </div>
+        </div>
+        <div class="theme-picker-grid" id="st-theme-picker">
+          <div class="theme-choice-card ${state.theme === 'dark' ? 'active' : ''}" data-theme="dark">
+            <div class="theme-mock-preview theme-mock-dark">
+              <div class="mock-bar"><div class="mock-dot"></div></div>
+              <div class="mock-body"><div class="mock-col"></div><div class="mock-col"></div><div class="mock-col"></div></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+              <b style="font-size:13.5px">${icon('moon', { size: 14 })} Sombre</b>
+              ${state.theme === 'dark' ? '<span class="badge done" style="font-size:10.5px">● Actif</span>' : ''}
+            </div>
+            <span class="muted" style="font-size:12px;line-height:1.4">Contraste profond façon Obsidian, reposant pour les yeux.</span>
+          </div>
+
+          <div class="theme-choice-card ${state.theme === 'light' ? 'active' : ''}" data-theme="light">
+            <div class="theme-mock-preview theme-mock-light">
+              <div class="mock-bar"><div class="mock-dot"></div></div>
+              <div class="mock-body"><div class="mock-col"></div><div class="mock-col"></div><div class="mock-col"></div></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+              <b style="font-size:13.5px">${icon('sun', { size: 14 })} Clair</b>
+              ${state.theme === 'light' ? '<span class="badge done" style="font-size:10.5px">● Actif</span>' : ''}
+            </div>
+            <span class="muted" style="font-size:12px;line-height:1.4">Style Studio épuré et lumineux, haute clarté visuelle.</span>
+          </div>
+
+          <div class="theme-choice-card ${state.theme === 'auto' ? 'active' : ''}" data-theme="auto">
+            <div class="theme-mock-preview theme-mock-auto">
+              <div class="mock-bar"><div class="mock-dot"></div></div>
+              <div class="mock-body"><div class="mock-col dark"></div><div class="mock-col light"></div></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+              <b style="font-size:13.5px">${icon('monitor', { size: 14 })} Système macOS</b>
+              ${state.theme === 'auto' ? '<span class="badge done" style="font-size:10.5px">● Actif</span>' : ''}
+            </div>
+            <span class="muted" style="font-size:12px;line-height:1.4">S'adapte automatiquement à l'apparence configurée sur votre Mac.</span>
+          </div>
         </div>
       </div>
 
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('layout', { size: 16, className: 'muted' })}
-          <span>Style d'interface</span>
-        </h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12.5px">Basculez entre le design Standard et le design Translucide (Liquid Glass / visionOS).</p>
-        <div class="viewtabs" id="st-style-picker" style="width:100%;display:flex">
-          <button data-style="standard" class="${state.style === 'standard' ? 'active' : ''}" style="flex:1;justify-content:center">
-            ${icon('kanban', { size: 14 })} <span>Standard</span>
-          </button>
-          <button data-style="translucent" class="${state.style === 'translucent' ? 'active' : ''}" style="flex:1;justify-content:center">
-            ${icon('ai', { size: 14 })} <span>Translucide Liquid Glass</span>
-          </button>
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('layout', { size: 18, className: 'muted' })} <span>Style d'interface (Design System)</span></h3>
+            <p class="settings-card-desc">Basculez entre le design Standard et le design Translucide Liquid Glass façon macOS / visionOS.</p>
+          </div>
         </div>
+        <div class="style-picker-grid" id="st-style-picker">
+          <div class="style-choice-card ${state.style === 'standard' ? 'active' : ''}" data-style="standard">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <b style="font-size:14px">${icon('kanban', { size: 14 })} Design Standard</b>
+              <span class="style-badge-tag">${state.style === 'standard' ? '● Actif' : 'Standard'}</span>
+            </div>
+            <p class="muted" style="font-size:12.5px;line-height:1.5;margin:0 0 10px">
+              Fonds opaques réguliers, contrastes marqués inspirés de Linear. Optimisé pour la performance maximale et une concentration sans distraction.
+            </p>
+            <div class="row" style="font-size:11.5px;color:var(--fg-secondary);gap:8px">
+              <span>✓ Contrastes nets</span>
+              <span>✓ Surfaces opaques</span>
+              <span>✓ Rendu ultra-rapide</span>
+            </div>
+          </div>
+
+          <div class="style-choice-card ${state.style === 'translucent' ? 'active' : ''}" data-style="translucent">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <b style="font-size:14px">${icon('ai', { size: 14 })} Translucide Liquid Glass</b>
+              <span class="style-badge-tag">${state.style === 'translucent' ? '● Actif' : 'Liquid Glass'}</span>
+            </div>
+            <p class="muted" style="font-size:12.5px;line-height:1.5;margin:0 0 10px">
+              Matériaux dépolis en temps réel, flou d'arrière-plan adaptatif et reflets de lumière subtils inspirés de macOS Sonoma et visionOS.
+            </p>
+            <div class="row" style="font-size:11.5px;color:var(--fg-secondary);gap:8px">
+              <span>✓ Verre dépoli dynamique</span>
+              <span>✓ Reflets subtils</span>
+              <span>✓ Intégration ambiances</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-persisted-pill">
+          ${icon('check', { size: 14 })} <span>Vos préférences d'interface sont enregistrées en base SQLite locale et conservées à chaque démarrage.</span>
+        </div>
+      </div>`;
+  } else if (tab === 'board') {
+    if (!board) {
+      tabContentHtml = `
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <h3 class="settings-card-title">${icon('boards', { size: 18 })} <span>Sélectionnez un tableau</span></h3>
+            <span class="muted">${state.boards.length} tableau(x)</span>
+          </div>
+          <p class="settings-card-desc">Choisissez un tableau pour personnaliser son ambiance, ses dates CPM, ses labels et ses champs :</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:14px">
+            ${state.boards.map((b) => `
+              <button class="btn sm ghost" data-select-board="${b.id}" style="justify-content:flex-start;padding:12px 14px;text-align:left">
+                ${icon('kanban', { size: 15 })} <b>${escapeHtml(b.title)}</b>
+              </button>
+            `).join('') || '<p class="muted">Aucun tableau créé pour l\'instant.</p>'}
+          </div>
+        </div>`;
+    } else {
+      tabContentHtml = `
+        <div class="settings-board-hero">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span class="badge" style="background:var(--accent);color:#fff">Tableau actif</span>
+              <h3 style="margin:0;font-size:16px;font-weight:700">${escapeHtml(board.title)}</h3>
+            </div>
+            <p class="muted" style="margin:0;font-size:12.5px">${state.lists.length} liste(s) · ${state.cards.length} carte(s) · ${state.labels.length} label(s)</p>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn sm" id="st-board-duplicate">${icon('copy', { size: 13 })} <span>Dupliquer</span></button>
+            <a href="#/boards/${board.id}/board" class="btn primary sm">${icon('kanban', { size: 13 })} <span>Ouvrir le Kanban</span></a>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('calendar', { size: 18, className: 'muted' })} <span>Planification & Dates CPM</span></h3>
+              <p class="settings-card-desc">Dates globales du projet utilisées pour l'ordonnancement par chemin critique (CPM) et le diagramme de Gantt.</p>
+            </div>
+          </div>
+          <div class="row" style="gap:12px;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:180px">
+              <label>Démarrage projet</label>
+              <input type="date" class="input" id="st-start" value="${board.start_date || ''}" />
+            </div>
+            <div class="field" style="flex:1;min-width:180px">
+              <label>Échéance globale</label>
+              <input type="date" class="input" id="st-deadline" value="${board.deadline || ''}" />
+            </div>
+            <div class="field" style="flex:1;min-width:200px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <label style="margin:0">Calendrier de travail</label>
+                <button class="btn sm ghost" data-tab-switch="calendars" style="font-size:11px;padding:2px 7px;height:auto">${icon('calendar', { size: 12 })} <span>Gérer</span></button>
+              </div>
+              <select class="input" id="st-calendar"><option value="default">Standard (week-end sam/dim)</option></select>
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <button class="btn primary sm" id="st-board-save">${icon('check', { size: 13 })} <span>Enregistrer les dates</span></button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('theme', { size: 18, className: 'muted' })} <span>Ambiance & Thème du Tableau</span></h3>
+              <p class="settings-card-desc">Arrière-plans dégradés et aurores visuelles appliqués au tableau actif.</p>
+            </div>
+          </div>
+          <div class="swatches" id="st-bg-swatches" style="gap:8px">
+            <button data-bg="${escapeHtml(JSON.stringify({ type: 'default', value: '#101828' }))}"
+                    title="Par défaut (s'adapte au mode clair ou sombre)"
+                    class="${!board.background || board.background.includes('#101828') ? 'sel' : ''}"
+                    style="background:var(--surface-2);border:1px dashed var(--border-strong);display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--muted);width:36px;height:36px;border-radius:var(--radius-xs)">auto</button>
+            ${BOARD_BACKGROUNDS.map((bg) => `
+              <button data-bg="${escapeHtml(JSON.stringify({ type: 'gradient', value: bg.value }))}"
+                      title="${bg.name}"
+                      class="${board.background?.includes(bg.value) ? 'sel' : ''}"
+                      style="background:${bg.value};width:36px;height:36px;border-radius:var(--radius-xs)"></button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('tag', { size: 18, className: 'muted' })} <span>Labels du tableau</span></h3>
+              <p class="settings-card-desc">Étiquettes de classement colorées attachées aux cartes.</p>
+            </div>
+            <button class="btn sm" id="st-add-label">${icon('plus', { size: 13 })} <span>Nouveau label</span></button>
+          </div>
+          <div id="st-labels" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('edit', { size: 18, className: 'muted' })} <span>Champs personnalisés</span></h3>
+              <p class="settings-card-desc">Métadonnées structurées par carte (texte, nombre, date, case à cocher, liste déroulante).</p>
+            </div>
+            <button class="btn sm" id="st-add-field">${icon('plus', { size: 13 })} <span>Nouveau champ</span></button>
+          </div>
+          <div id="st-fields" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('import', { size: 18, className: 'muted' })} <span>Exports de données</span></h3>
+              <p class="settings-card-desc">Exportez l'intégralité du tableau dans le format de votre choix.</p>
+            </div>
+          </div>
+          <div class="row" style="flex-wrap:wrap;gap:8px">
+            <button class="btn sm" id="st-board-export-json">Export JSON complet</button>
+            <button class="btn sm" id="st-board-export-md">Export Markdown</button>
+            <button class="btn sm" id="st-board-export-csv">Export CSV</button>
+            <button class="btn sm" id="st-board-export-ics">Export Calendrier iCal (.ics)</button>
+          </div>
+        </div>
+
+        <div class="settings-card settings-danger-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('alert', { size: 18 })} <span>Suppression du tableau</span></h3>
+              <p class="settings-card-desc">Suppression définitive du tableau « ${escapeHtml(board.title)} » (cartes, listes, labels, règles associées).</p>
+            </div>
+            <button class="btn danger sm" id="st-board-delete">${icon('trash', { size: 13 })} <span>Supprimer ce tableau</span></button>
+          </div>
+        </div>`;
+    }
+  } else if (tab === 'automations') {
+    if (!board) {
+      tabContentHtml = `
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <h3 class="settings-card-title">${icon('settings', { size: 18 })} <span>Sélectionnez un tableau</span></h3>
+          </div>
+          <p class="settings-card-desc">Choisissez un tableau pour configurer ses automatisations :</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:14px">
+            ${state.boards.map((b) => `
+              <button class="btn sm ghost" data-select-board="${b.id}" style="justify-content:flex-start;padding:12px 14px;text-align:left">
+                ${icon('kanban', { size: 15 })} <b>${escapeHtml(b.title)}</b>
+              </button>
+            `).join('')}
+          </div>
+        </div>`;
+    } else {
+      tabContentHtml = `
+        <div class="settings-card">
+          <div class="settings-card-head">
+            <div>
+              <h3 class="settings-card-title">${icon('settings', { size: 18, className: 'muted' })} <span>Automatisations (bot local style Butler)</span></h3>
+              <p class="settings-card-desc">Définissez des règles automatiques « Quand… Alors… » (déplacement, archivage, alertes d'échéances, copie cross-board).</p>
+            </div>
+            <div class="row" style="gap:8px">
+              <button class="btn primary sm" id="st-add-automation">${icon('plus', { size: 13 })} <span>Nouvelle règle</span></button>
+              <button class="btn sm" id="st-auto-runs-toggle">${icon('clock', { size: 13 })} <span>Journal</span></button>
+            </div>
+          </div>
+          <div id="st-automations"></div>
+          <div id="st-auto-runs" style="display:none;margin-top:12px"></div>
+        </div>`;
+    }
+  } else if (tab === 'ai') {
+    tabContentHtml = `
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('ai', { size: 18, className: 'muted' })} <span>Moteur Apple Intelligence</span></h3>
+            <p class="settings-card-desc">Assistant intelligent intégré exécuté à 100 % sur puce Apple Silicon locale (CoreML / Swift). Aucune donnée ne quitte votre machine.</p>
+          </div>
+        </div>
+        <div id="st-ai" style="padding:4px 0 8px"><span class="muted">Vérification de la disponibilité du moteur…</span></div>
       </div>
 
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('ai', { size: 16, className: 'muted' })}
-          <span>Assistant IA — Apple Intelligence</span>
-        </h3>
-        <div id="st-ai"><span class="muted">Vérification de la disponibilité…</span></div>
-      </div>
-
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('import', { size: 16, className: 'muted' })}
-          <span>Sauvegardes automatiques</span>
-        </h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12.5px">
-          Copie compacte et cohérente de toute la base (boards, cartes, listes, labels…) dans un répertoire de votre choix.
-          Rotation automatique : au-delà du nombre conservé, les plus anciennes sont supprimées.
-          Répertoire vide = sauvegardes automatiques désactivées.
-        </p>
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('ai', { size: 18, className: 'muted' })} <span>Fonctionnalités IA intégrées</span></h3>
+            <p class="settings-card-desc">Outils disponibles dans la barre supérieure, les fiches de cartes et le volet Copilot :</p>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:10px">
+          <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius-md);border:1px solid var(--border)">
+            <b style="font-size:13px;display:flex;align-items:center;gap:6px">${icon('kanban', { size: 14 })} Génération de projet</b>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;line-height:1.4">Transforme un objectif ou cahier des charges en listes, tâches ordonnées et dépendances CPM.</p>
+          </div>
+          <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius-md);border:1px solid var(--border)">
+            <b style="font-size:13px;display:flex;align-items:center;gap:6px">${icon('edit', { size: 14 })} Saisie en langage naturel</b>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;line-height:1.4">Extrait automatiquement le titre, l'échéance et la priorité à partir d'une phrase rapide.</p>
+          </div>
+          <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius-md);border:1px solid var(--border)">
+            <b style="font-size:13px;display:flex;align-items:center;gap:6px">${icon('timeline', { size: 14 })} Priorisation du backlog</b>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;line-height:1.4">Évalue et ordonne automatiquement les cartes selon leur urgence et le chemin critique.</p>
+          </div>
+          <div style="padding:12px;background:var(--surface-2);border-radius:var(--radius-md);border:1px solid var(--border)">
+            <b style="font-size:13px;display:flex;align-items:center;gap:6px">${icon('check', { size: 14 })} Checklists automatiques</b>
+            <p class="muted" style="font-size:12px;margin:6px 0 0;line-height:1.4">Décompose instantanément n'importe quelle carte complexe en sous-étapes logiques.</p>
+          </div>
+        </div>
+      </div>`;
+  } else if (tab === 'backups') {
+    tabContentHtml = `
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('import', { size: 18, className: 'muted' })} <span>Sauvegardes automatiques (SQLite VACUUM INTO)</span></h3>
+            <p class="settings-card-desc">
+              Copies compactes et cohérentes de toute la base (tableaux, cartes, listes, labels, automations) sans aucun risque de corruption.
+              Rotation automatique au-delà du quota configuré.
+            </p>
+          </div>
+        </div>
         <div class="field">
-          <label>Répertoire de destination <span id="st-backup-dir-hint" class="muted" style="font-size:11.5px">(saisie manuelle — le sélecteur natif est disponible dans l'app Krello)</span></label>
+          <label>Répertoire de destination <span id="st-backup-dir-hint" class="muted" style="font-size:11.5px">(le sélecteur natif est disponible dans l'app Krello)</span></label>
           <div class="row" style="gap:8px">
             <input class="input" id="st-backup-dir" placeholder="/Users/moi/Sauvegardes/krello" style="flex:1" />
             <button class="btn ghost sm" id="st-backup-browse" style="flex:none;display:none">📁 Parcourir…</button>
           </div>
         </div>
-        <div class="row" style="gap:8px;margin-top:8px">
-          <div class="field" style="flex:1">
-            <label>Intervalle</label>
+        <div class="row" style="gap:12px;margin-top:10px;flex-wrap:wrap">
+          <div class="field" style="flex:1;min-width:180px">
+            <label>Intervalle automatique</label>
             <select class="input" id="st-backup-interval">
               <option value="1">Toutes les heures</option>
-              <option value="6">Toutes les 6 h</option>
-              <option value="12">Toutes les 12 h</option>
+              <option value="6">Toutes les 6 heures</option>
+              <option value="12">Toutes les 12 heures</option>
               <option value="24">Une fois par jour</option>
               <option value="168">Une fois par semaine</option>
             </select>
           </div>
-          <div class="field" style="flex:1">
+          <div class="field" style="flex:1;min-width:180px">
             <label>Copies conservées</label>
             <input type="number" min="1" max="100" class="input" id="st-backup-keep" />
           </div>
         </div>
-        <div class="row" style="gap:8px;margin-top:10px">
-          <button class="btn primary sm" id="st-backup-save">Enregistrer</button>
+        <div class="row" style="gap:8px;margin-top:14px">
+          <button class="btn primary sm" id="st-backup-save">${icon('check', { size: 13 })} <span>Enregistrer les réglages</span></button>
           <button class="btn ghost sm" id="st-backup-run">Sauvegarder maintenant</button>
         </div>
-        <div id="st-backup-status" style="margin-top:8px"><span class="muted">…</span></div>
+        <div id="st-backup-status" style="margin-top:12px"><span class="muted">…</span></div>
       </div>
 
-      <div class="panel" style="border:1px solid var(--error)">
-        <h3 style="display:flex;align-items:center;gap:8px;color:var(--error)">
-          ${icon('alert', { size: 16 })}
-          <span>Zone de danger</span>
-        </h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12.5px">
-          Suppressions définitives de données locales. Annulables uniquement via ⌘Z pendant la session en cours.
-        </p>
-        <div class="row" style="flex-wrap:wrap;gap:8px">
-          ${board ? `<button class="btn danger sm" id="st-board-delete2">${icon('trash', { size: 13 })} <span>Supprimer ce board</span></button>` : ''}
-          <button class="btn danger sm" id="st-delete-all">${icon('trash', { size: 13 })} <span>Tout supprimer — tous les boards</span></button>
-        </div>
-      </div>
-
-      ${board ? `
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('boards', { size: 16, className: 'muted' })}
-          <span>Configuration du Board « ${escapeHtml(board.title)} »</span>
-        </h3>
-        <div class="field"><label>Démarrage projet (calcul CPM)</label><input type="date" class="input" id="st-start" value="${board.start_date || ''}" /></div>
-        <div class="field"><label>Échéance globale projet</label><input type="date" class="input" id="st-deadline" value="${board.deadline || ''}" /></div>
-        <div class="field"><label>Calendrier de travail</label>
-          <select class="input" id="st-calendar"><option value="default">Standard (week-end sam/dim)</option></select>
-        </div>
-        <div class="field" style="margin-top:14px">
-          <label>Ambiance & Thème du Board</label>
-          <div class="swatches" id="st-bg-swatches" style="margin-top:6px;gap:8px">
-            <button data-bg="${escapeHtml(JSON.stringify({ type: 'default', value: '#101828' }))}"
-                    title="Par défaut (s'adapte au mode clair ou sombre)"
-                    class="${!board.background || board.background.includes('#101828') ? 'sel' : ''}"
-                    style="background:var(--surface-2);border:1px dashed var(--border-strong);display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--muted);width:34px;height:34px;border-radius:var(--radius-xs)">auto</button>
-            ${BOARD_BACKGROUNDS.map((bg) => `
-              <button data-bg="${escapeHtml(JSON.stringify({ type: 'gradient', value: bg.value }))}"
-                      title="${bg.name}"
-                      class="${board.background?.includes(bg.value) ? 'sel' : ''}"
-                      style="background:${bg.value};width:34px;height:34px;border-radius:var(--radius-xs)"></button>
-            `).join('')}
+      <div class="settings-card settings-danger-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('alert', { size: 18 })} <span>Zone de danger</span></h3>
+            <p class="settings-card-desc">Opérations de suppression définitive des données locales.</p>
           </div>
         </div>
-        <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:16px">
-          <button class="btn primary sm" id="st-board-save">Enregistrer</button>
-          <button class="btn sm" id="st-board-duplicate">${icon('copy', { size: 13 })} <span>Dupliquer</span></button>
-          <button class="btn sm" id="st-board-export-json">Export JSON</button>
-          <button class="btn sm" id="st-board-export-md">Export MD</button>
-          <button class="btn sm" id="st-board-export-csv">Export CSV</button>
-          <button class="btn sm" id="st-board-export-ics">Export ICS</button>
-          <button class="btn danger sm" id="st-board-delete">${icon('trash', { size: 13 })} <span>Supprimer</span></button>
+        <div class="row" style="flex-wrap:wrap;gap:10px">
+          ${board ? `<button class="btn danger sm" id="st-board-delete2">${icon('trash', { size: 13 })} <span>Supprimer le tableau actif « ${escapeHtml(board.title)} »</span></button>` : ''}
+          <button class="btn danger sm" id="st-delete-all">${icon('trash', { size: 13 })} <span>Tout supprimer (tous les tableaux et cartes)</span></button>
         </div>
+      </div>`;
+  } else if (tab === 'calendars') {
+    tabContentHtml = `
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('calendar', { size: 18, className: 'muted' })} <span>Calendriers de travail (moteur CPM)</span></h3>
+            <p class="settings-card-desc">Définit les heures travaillées par jour et les jours fériés pris en compte dans le calcul du chemin critique.</p>
+          </div>
+          <button class="btn sm" id="st-add-calendar">${icon('plus', { size: 13 })} <span>Nouveau calendrier</span></button>
+        </div>
+        <div id="st-calendars" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>`;
+  }
+
+  host.innerHTML = `
+    <div class="settings-container">
+      <div class="settings-header">
+        <h2>Paramètres</h2>
+        <p>Personnalisez votre environnement de travail, l'apparence de l'application et la configuration de vos tableaux.</p>
       </div>
 
-      <div class="panel">
-        <h3>Labels du board</h3>
-        <div id="st-labels"></div>
-        <button class="btn sm" id="st-add-label" style="margin-top:10px">
-          ${icon('plus', { size: 13 })} <span>Nouveau label</span>
+      <div class="settings-tabs-bar" id="st-tabs">
+        <button class="settings-tab-btn ${tab === 'appearance' ? 'active' : ''}" data-tab="appearance">
+          ${icon('theme', { size: 15 })} <span>Apparence</span>
+        </button>
+        <button class="settings-tab-btn ${tab === 'board' ? 'active' : ''}" data-tab="board">
+          ${icon('kanban', { size: 15 })} <span>Tableau</span>
+        </button>
+        <button class="settings-tab-btn ${tab === 'calendars' ? 'active' : ''}" data-tab="calendars">
+          ${icon('calendar', { size: 15 })} <span>Calendriers</span>
+        </button>
+        <button class="settings-tab-btn ${tab === 'automations' ? 'active' : ''}" data-tab="automations">
+          ${icon('settings', { size: 15 })} <span>Automatisations</span>
+        </button>
+        <button class="settings-tab-btn ${tab === 'ai' ? 'active' : ''}" data-tab="ai">
+          ${icon('ai', { size: 15 })} <span>Apple Intelligence</span>
+        </button>
+        <button class="settings-tab-btn ${tab === 'backups' ? 'active' : ''}" data-tab="backups">
+          ${icon('import', { size: 15 })} <span>Sauvegardes</span>
         </button>
       </div>
 
-      <div class="panel">
-        <h3>Champs personnalisés</h3>
-        <div id="st-fields"></div>
-        <button class="btn sm" id="st-add-field" style="margin-top:10px">
-          ${icon('plus', { size: 13 })} <span>Nouveau champ</span>
-        </button>
-      </div>
-
-      <div class="panel">
-        <h3 style="display:flex;align-items:center;gap:8px">
-          ${icon('settings', { size: 16, className: 'muted' })}
-          <span>Automatisations (bot local)</span>
-        </h3>
-        <p class="muted" style="margin:0 0 10px;font-size:12.5px">Règles « quand… alors… » façon Butler. Les actions peuvent cibler un autre board (copier / créer / déplacer). Chaque exécution est journalisée.</p>
-        <div id="st-automations"></div>
-        <button class="btn sm" id="st-add-automation" style="margin-top:10px">
-          ${icon('plus', { size: 13 })} <span>Nouvelle règle</span>
-        </button>
-        <button class="btn sm" id="st-auto-runs-toggle" style="margin-top:10px">
-          ${icon('clock', { size: 13 })} <span>Journal d’exécution du board</span>
-        </button>
-        <div id="st-auto-runs" style="display:none;margin-top:8px"></div>
-      </div>` : '<div class="panel"><h3>Board</h3><span class="muted">Ouvrez un board pour éditer ses paramètres spécifiques.</span></div>'}
-
-      <div class="panel">
-        <h3>Calendriers de travail</h3>
-        <div id="st-calendars"></div>
-        <button class="btn sm" id="st-add-calendar" style="margin-top:10px">
-          ${icon('plus', { size: 13 })} <span>Nouveau calendrier</span>
-        </button>
+      <div class="settings-content">
+        ${tabContentHtml}
       </div>
     </div>`;
 
-  // --- Thème
+  // --- Gestion du changement d'onglets
+  host.querySelector('#st-tabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-tab]');
+    if (!btn) return;
+    state.settingsTab = btn.dataset.tab;
+    renderSettings();
+  });
+
+  host.querySelectorAll('[data-tab-switch]').forEach((btn) => {
+    btn.onclick = () => {
+      state.settingsTab = btn.dataset.tabSwitch;
+      renderSettings();
+    };
+  });
+
+  // --- Sélecteur de tableau quand aucun board n'est ouvert
+  host.querySelectorAll('[data-select-board]').forEach((btn) => {
+    btn.onclick = async () => {
+      await loadBoard(btn.dataset.selectBoard);
+      renderSettings();
+    };
+  });
+
+  // =========================================================================
+  // Onglet Apparence : Thème & Style
+  // =========================================================================
   host.querySelector('#st-theme-picker')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-theme]');
-    if (!btn) return;
-    state.theme = btn.dataset.theme;
-    applyTheme();
+    const card = e.target.closest('[data-theme]');
+    if (!card) return;
+    state.theme = card.dataset.theme;
+    applyTheme(true);
     const tb = document.getElementById('topbar');
-    if (tb) {
-      import('../components/topbar.js').then((m) => m.renderTopbar(tb));
-    }
+    if (tb) import('../components/topbar.js').then((m) => m.renderTopbar(tb));
     const sb = document.getElementById('sidebar');
-    if (sb) {
-      import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
-    }
+    if (sb) import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
     renderSettings();
+    toast('Thème d\'apparence enregistré et appliqué', 'ok');
   });
 
-  // --- Style (Standard vs Translucide Liquid Glass)
   host.querySelector('#st-style-picker')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-style]');
-    if (!btn) return;
-    state.style = btn.dataset.style;
-    applyStyle();
+    const card = e.target.closest('[data-style]');
+    if (!card) return;
+    state.style = card.dataset.style;
+    applyStyle(true);
     const tb = document.getElementById('topbar');
-    if (tb) {
-      import('../components/topbar.js').then((m) => m.renderTopbar(tb));
-    }
+    if (tb) import('../components/topbar.js').then((m) => m.renderTopbar(tb));
     const sb = document.getElementById('sidebar');
-    if (sb) {
-      import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
-    }
+    if (sb) import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
     renderSettings();
+    toast(`Style ${state.style === 'translucent' ? 'Translucide Liquid Glass' : 'Standard'} appliqué et enregistré`, 'ok');
   });
 
-  // --- IA
-  api.aiStatus().then((s) => {
-    host.querySelector('#st-ai').innerHTML = s.available
-      ? `<span class="badge done">● Disponible</span> <p class="muted" style="margin:8px 0 0;font-size:12.5px">Moteur Apple Intelligence actif (${s.backend}). 100 % on-device — aucune donnée ne quitte votre appareil.</p>`
-      : `<span class="badge overdue">● Indisponible</span> <p class="muted" style="margin:8px 0 0;font-size:12.5px">${s.reason || ''} — Nécessite macOS 15.1+ sur Mac Apple Silicon avec Apple Intelligence activée dans Réglages Système.</p>`;
-  });
+  // =========================================================================
+  // Onglet IA
+  // =========================================================================
+  const stAi = host.querySelector('#st-ai');
+  if (stAi) {
+    api.aiStatus().then((s) => {
+      stAi.innerHTML = s.available
+        ? `<div class="row" style="gap:8px">
+            <span class="badge done" style="font-size:12px">● Moteur opérationnel (${escapeHtml(s.backend)})</span>
+          </div>
+          <p class="muted" style="margin:8px 0 0;font-size:12.5px;line-height:1.5">
+            Apple Intelligence s'exécute directement sur le Neural Engine de votre Mac. Confidentialité intégrale garantie sans transfert de données réseau.
+          </p>`
+        : `<div class="row" style="gap:8px">
+            <span class="badge overdue" style="font-size:12px">● Moteur non disponible</span>
+          </div>
+          <p class="muted" style="margin:8px 0 0;font-size:12.5px;line-height:1.5">
+            ${escapeHtml(s.reason || '')} — Nécessite macOS 15.1+ sur Mac Apple Silicon avec Apple Intelligence activée dans Réglages Système.
+          </p>`;
+    }).catch(() => {
+      stAi.innerHTML = '<span class="muted" style="font-size:12px">Statut indisponible</span>';
+    });
+  }
 
-  // --- Sauvegardes automatiques
+  // =========================================================================
+  // Onglet Sauvegardes & Données
+  // =========================================================================
   const stBackupStatus = host.querySelector('#st-backup-status');
   const stBackupDir = host.querySelector('#st-backup-dir');
   const stBackupInterval = host.querySelector('#st-backup-interval');
   const stBackupKeep = host.querySelector('#st-backup-keep');
   const stBackupBrowse = host.querySelector('#st-backup-browse');
   const stBackupDirHint = host.querySelector('#st-backup-dir-hint');
-  // Sélecteur natif (Finder/Explorer) : ouvert par le serveur in-process via
-  // rfd — disponible uniquement dans la fenêtre Krello, pas dans un navigateur.
   const inNativeApp = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__;
-  if (inNativeApp && stBackupBrowse) {
+
+  if (stBackupBrowse && inNativeApp) {
     stBackupBrowse.style.display = '';
     if (stBackupDirHint) stBackupDirHint.textContent = '(cliquez sur Parcourir… pour choisir un dossier natif)';
     stBackupBrowse.addEventListener('click', async () => {
@@ -717,23 +969,28 @@ export function renderSettings() {
         const r = await api.pickBackupDir();
         if (r.dir) {
           stBackupDir.value = r.dir;
-          toast('Répertoire sélectionné — pensez à Enregistrer', 'ok');
+          toast('Répertoire sélectionné — pensez à Enregistrer les réglages', 'ok');
         }
       } catch (e) { toast(e.message, 'err'); }
       finally { stBackupBrowse.disabled = false; }
     });
   }
+
   const backupStatusHtml = (s) => s.last_backup_at
-    ? `<span class="badge done">● Dernière : ${escapeHtml(s.last_backup_at.slice(0, 16).replace('T', ' '))}</span> <span class="muted" style="font-size:12px">${escapeHtml(s.last_backup_file || '')}</span>`
-    : '<span class="muted">Aucune sauvegarde pour l\'instant.</span>';
-  api.backupSettings().then((s) => {
-    if (stBackupDir) stBackupDir.value = s.backup_dir || '';
-    if (stBackupInterval) stBackupInterval.value = String(s.interval_hours);
-    if (stBackupKeep) stBackupKeep.value = String(s.keep);
-    if (stBackupStatus) stBackupStatus.innerHTML = backupStatusHtml(s);
-  }).catch((e) => {
-    if (stBackupStatus) stBackupStatus.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
-  });
+    ? `<span class="badge done">● Dernière sauvegarde : ${escapeHtml(s.last_backup_at.slice(0, 16).replace('T', ' '))}</span> <span class="muted" style="font-size:12px;margin-left:8px">${escapeHtml(s.last_backup_file || '')}</span>`
+    : '<span class="muted" style="font-size:12px">Aucune sauvegarde enregistrée pour l\'instant.</span>';
+
+  if (stBackupDir) {
+    api.backupSettings().then((s) => {
+      if (stBackupDir) stBackupDir.value = s.backup_dir || '';
+      if (stBackupInterval) stBackupInterval.value = String(s.interval_hours);
+      if (stBackupKeep) stBackupKeep.value = String(s.keep);
+      if (stBackupStatus) stBackupStatus.innerHTML = backupStatusHtml(s);
+    }).catch((e) => {
+      if (stBackupStatus) stBackupStatus.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+    });
+  }
+
   host.querySelector('#st-backup-save')?.addEventListener('click', async () => {
     try {
       const s = await api.saveBackupSettings({
@@ -745,6 +1002,7 @@ export function renderSettings() {
       if (stBackupStatus) stBackupStatus.innerHTML = backupStatusHtml(s);
     } catch (e) { toast(e.message, 'err'); }
   });
+
   host.querySelector('#st-backup-run')?.addEventListener('click', async () => {
     try {
       await api.saveBackupSettings({
@@ -754,189 +1012,223 @@ export function renderSettings() {
       });
       const r = await api.runBackup();
       toast(`Sauvegarde créée (${Math.max(1, Math.round(r.size / 1024))} Ko)`, 'ok');
-      if (stBackupStatus) stBackupStatus.innerHTML =
-        `<span class="badge done">● Dernière : maintenant</span> <span class="muted" style="font-size:12px">${escapeHtml(r.file)}</span>`;
+      if (stBackupStatus) {
+        stBackupStatus.innerHTML = `<span class="badge done">● Dernière : maintenant</span> <span class="muted" style="font-size:12px;margin-left:8px">${escapeHtml(r.file)}</span>`;
+      }
     } catch (e) { toast(e.message, 'err'); }
   });
 
-  // --- zone de danger globale : tout supprimer (disponible même sans board ouvert)
-  host.querySelector('#st-delete-all').onclick = async () => {
+  // Zone de danger globale : tout supprimer
+  host.querySelector('#st-delete-all')?.addEventListener('click', async () => {
     const n = state.boards.length;
-    if (n === 0) { toast('Aucun board à supprimer', 'err'); return; }
-    if (!(await confirmDialog(`⚠ TOUT SUPPRIMER : supprimer définitivement les ${n} board${n > 1 ? 's' : ''} (listes, cartes, labels, champs, règles, commentaires, pièces jointes) ? Annulable uniquement avec ⌘Z pendant cette session.`))) return;
+    if (n === 0) { toast('Aucun tableau à supprimer', 'err'); return; }
+    if (!(await confirmDialog(`⚠ TOUT SUPPRIMER : supprimer définitivement les ${n} tableau${n > 1 ? 's' : ''} (listes, cartes, labels, champs, règles, commentaires, pièces jointes) ? Annulable uniquement avec ⌘Z pendant cette session.`))) return;
     try {
       const r = await api.deleteAllBoards();
       await loadBoards();
       state.board = null;
       state.lists = []; state.cards = []; state.labels = []; state.fields = []; state.deps = []; state.schedule = null;
       applyBoardBackground(null);
-      toast(`${r.deleted} board(s) supprimé(s)`, 'ok');
+      toast(`${r.deleted} tableau(x) supprimé(s)`, 'ok');
       navigate('#/');
       renderSettings();
     } catch (e) { toast(e.message, 'err'); }
-  };
-
-  if (!board) return;
-  const boardId = board.id;
-
-  // --- board
-  host.querySelector('#st-bg-swatches')?.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-bg]');
-    if (!btn) return;
-    const bg = btn.dataset.bg;
-    try {
-      await api.updateBoard(boardId, { background: bg });
-      await loadBoard(boardId);
-      const sb = document.getElementById('sidebar');
-      if (sb) {
-        import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
-      }
-      renderSettings();
-      toast('Ambiance du board modifiée', 'ok');
-    } catch (err) { toast(err.message, 'err'); }
   });
 
-  host.querySelector('#st-board-save').onclick = async () => {
-    try {
-      await api.updateBoard(boardId, {
-        start_date: host.querySelector('#st-start').value || null,
-        deadline: host.querySelector('#st-deadline').value || null,
-      });
-      toast('Board enregistré — ordonnancement recalculé', 'ok');
-      await loadBoard(boardId);
-    } catch (e) { toast(e.message, 'err'); }
-  };
-  host.querySelector('#st-board-duplicate').onclick = async () => {
-    const b = await api.duplicateBoard(boardId);
-    await loadBoards();
-    navigate(boardUrl(b.id, 'board'));
-    toast('Board dupliqué', 'ok');
-  };
-  for (const fmt of ['json', 'md', 'csv', 'ics']) {
-    host.querySelector(`#st-board-export-${fmt}`).onclick = () => {
-      window.open(`/api/v1/boards/${boardId}/export?format=${fmt}`, '_blank');
-    };
-  }
+  // =========================================================================
+  // Onglet Tableau actif & Calendriers
+  // =========================================================================
   const delBoardCurrent = async () => {
-    if (!(await confirmDialog(`Supprimer définitivement le board « ${board.title} » ? Toutes ses listes, cartes, labels et règles seront supprimées (annulable avec ⌘Z dans la session).`))) return;
+    if (!board) return;
+    if (!(await confirmDialog(`Supprimer définitivement le tableau « ${board.title} » ? Toutes ses listes, cartes, labels et règles seront supprimées (annulable avec ⌘Z dans la session).`))) return;
     try {
-      await api.deleteBoard(boardId);
+      await api.deleteBoard(board.id);
       await loadBoards();
-      toast(`Board « ${board.title} » supprimé`, 'ok');
+      toast(`Tableau « ${board.title} » supprimé`, 'ok');
       if (state.boards.length) navigate(boardUrl(state.boards[0].id, 'board'));
       else { state.board = null; applyBoardBackground(null); navigate('#/'); }
     } catch (e) { toast(e.message, 'err'); }
   };
-  host.querySelector('#st-board-delete').onclick = delBoardCurrent;
+
+  host.querySelector('#st-board-delete')?.addEventListener('click', delBoardCurrent);
   host.querySelector('#st-board-delete2')?.addEventListener('click', delBoardCurrent);
 
-  // --- labels
-  const labelsHost = host.querySelector('#st-labels');
-  labelsHost.innerHTML = state.labels.map((l) => `
-    <div class="row" style="margin-bottom:6px;gap:8px" data-label="${l.id}">
-      <span class="chip-label" style="background:${l.color};min-width:60px;text-align:center">${escapeHtml(l.name || '•')}</span>
-      <input class="input" data-rename value="${escapeHtml(l.name)}" placeholder="Nom du label" style="padding:4px 8px;font-size:12.5px" />
-      <button class="iconbtn" data-del title="Supprimer" style="width:24px;height:24px">${icon('close', { size: 12 })}</button>
-    </div>`).join('');
-  labelsHost.addEventListener('change', async (e) => {
-    const row = e.target.closest('[data-label]');
-    if (row && e.target.matches('[data-rename]')) {
-      await api.updateLabel(row.dataset.label, { name: e.target.value });
-      await loadBoard(boardId);
-      toast('Label mis à jour', 'ok');
-    }
-  });
-  labelsHost.addEventListener('click', async (e) => {
-    if (e.target.closest('[data-del]')) {
-      const row = e.target.closest('[data-label]');
-      await api.deleteLabel(row.dataset.label);
-      await loadBoard(boardId);
-      renderSettings();
-    }
-  });
-  host.querySelector('#st-add-label').onclick = async () => {
-    const name = await promptDialog('Nom du label');
-    if (!name) return;
-    const color = LABEL_COLORS[state.labels.length % LABEL_COLORS.length];
-    await api.createLabel(boardId, { name, color });
-    await loadBoard(boardId);
-    renderSettings();
-  };
+  if (board) {
+    const boardId = board.id;
 
-  // --- champs
-  const fieldsHost = host.querySelector('#st-fields');
-  fieldsHost.innerHTML = state.fields.map((f) => `
-    <div class="row" style="margin-bottom:6px;padding:4px 8px;border-radius:var(--radius-xs);background:var(--surface-2)">
-      <b style="font-size:13px">${escapeHtml(f.name)}</b>
-      <span class="badge" style="margin-left:auto">${f.kind}</span>
-      <button class="iconbtn" data-del-field="${f.id}" title="Supprimer" style="width:22px;height:22px">${icon('close', { size: 12 })}</button>
-    </div>`).join('') || '<span class="muted" style="font-size:12.5px">Aucun champ personnalisé</span>';
-  fieldsHost.querySelectorAll('[data-del-field]').forEach((b) => {
-    b.onclick = async () => { await api.deleteField(b.dataset.delField); await loadBoard(boardId); renderSettings(); };
-  });
-  host.querySelector('#st-add-field').onclick = async () => {
-    const name = await promptDialog('Nom du champ');
-    if (!name) return;
-    const kind = await promptDialog('Type (text, number, date, checkbox, select)', 'text');
-    if (!kind) return;
-    try {
-      await api.createField(boardId, { name, kind });
-      await loadBoard(boardId);
-      renderSettings();
-    } catch (e) { toast(e.message, 'err'); }
-  };
-
-  // --- automations
-  renderAutomations(host.querySelector('#st-automations'), boardId);
-  host.querySelector('#st-add-automation').onclick = () => openAutomationModal(boardId, null);
-  host.querySelector('#st-auto-runs-toggle').onclick = async () => {
-    const box = host.querySelector('#st-auto-runs');
-    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-    try {
-      const autos = await api.automations(boardId);
-      const runs = await api.boardAutomationRuns(boardId, 30);
-      const nameOf = (id) => autos.find((a) => a.id === id)?.name || id;
-      box.innerHTML = runs.map((r) => `
-        <div class="row" style="font-size:11.5px;padding:4px 8px;gap:8px;background:var(--surface-2);border-radius:var(--radius-xs);margin-bottom:4px">
-          <span class="badge" style="background:${r.ok ? 'var(--success)' : 'var(--error)'};color:#fff">${r.ok ? 'OK' : 'ERR'}</span>
-          <b style="white-space:nowrap">${escapeHtml(nameOf(r.automation_id))}</b>
-          <span class="muted" style="flex:1">${escapeHtml(r.trigger)} · ${escapeHtml((r.created_at || '').replace('T', ' ').slice(0, 19))}</span>
-          <span class="muted" style="max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.detail)}">${escapeHtml(r.detail)}</span>
-        </div>`).join('') || '<span class="muted" style="font-size:12px">Aucune exécution journalisée.</span>';
-      box.style.display = 'block';
-    } catch (e) { toast(e.message, 'err'); }
-  };
-
-  // --- calendriers
-  const calHost = host.querySelector('#st-calendars');
-  api.calendars().then((cals) => {
-    const select = host.querySelector('#st-calendar');
-    select.innerHTML = cals.map((c) => `<option value="${c.id}" ${c.id === board.calendar_id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
-    calHost.innerHTML = cals.map((c) => `
-      <div class="row" style="margin-bottom:6px;padding:4px 8px;border-radius:var(--radius-xs);background:var(--surface-2)">
-        <b style="flex:1">${escapeHtml(c.name)}</b>
-        <span class="muted">${c.hours_per_day} h/j</span>
-        <button class="iconbtn" data-del-cal="${c.id}" ${c.id === 'default' ? 'disabled style="opacity:.3"' : ''} title="Supprimer" style="width:22px;height:22px">${icon('trash', { size: 12 })}</button>
-      </div>`).join('');
-    calHost.querySelectorAll('[data-del-cal]').forEach((b) => {
-      b.onclick = async () => {
-        try { await api.deleteCalendar(b.dataset.delCal); renderSettings(); }
-        catch (e) { toast(e.message, 'err'); }
-      };
+    // Ambiance du tableau
+    host.querySelector('#st-bg-swatches')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-bg]');
+      if (!btn) return;
+      const bg = btn.dataset.bg;
+      try {
+        await api.updateBoard(boardId, { background: bg });
+        await loadBoard(boardId);
+        const sb = document.getElementById('sidebar');
+        if (sb) import('../components/sidebar.js').then((m) => m.renderSidebar(sb));
+        renderSettings();
+        toast('Ambiance du tableau modifiée', 'ok');
+      } catch (err) { toast(err.message, 'err'); }
     });
-    select.onchange = async () => {
-      await api.updateBoard(boardId, { calendar_id: select.value });
+
+    // Sauvegarde des dates
+    host.querySelector('#st-board-save')?.addEventListener('click', async () => {
+      try {
+        await api.updateBoard(boardId, {
+          start_date: host.querySelector('#st-start')?.value || null,
+          deadline: host.querySelector('#st-deadline')?.value || null,
+        });
+        toast('Tableau enregistré — ordonnancement CPM recalculé', 'ok');
+        await loadBoard(boardId);
+      } catch (e) { toast(e.message, 'err'); }
+    });
+
+    // Dupliquer le tableau
+    host.querySelector('#st-board-duplicate')?.addEventListener('click', async () => {
+      const b = await api.duplicateBoard(boardId);
+      await loadBoards();
+      navigate(boardUrl(b.id, 'board'));
+      toast('Tableau dupliqué', 'ok');
+    });
+
+    // Exports de données
+    for (const fmt of ['json', 'md', 'csv', 'ics']) {
+      const btn = host.querySelector(`#st-board-export-${fmt}`);
+      if (btn) {
+        btn.onclick = () => window.open(`/api/v1/boards/${boardId}/export?format=${fmt}`, '_blank');
+      }
+    }
+
+    // Calendrier associé au board
+    const calSelect = host.querySelector('#st-calendar');
+    if (calSelect) {
+      api.calendars().then((cals) => {
+        calSelect.innerHTML = cals.map((c) => `<option value="${c.id}" ${c.id === board.calendar_id ? 'selected' : ''}>${escapeHtml(c.name)} (${c.hours_per_day} h/j)</option>`).join('');
+        calSelect.onchange = async () => {
+          await api.updateBoard(boardId, { calendar_id: calSelect.value });
+          await loadBoard(boardId);
+          toast('Calendrier appliqué — recalcul CPM effectué', 'ok');
+        };
+      }).catch(() => {});
+    }
+
+    // Labels du tableau
+    const labelsHost = host.querySelector('#st-labels');
+    if (labelsHost) {
+      labelsHost.innerHTML = state.labels.map((l) => `
+        <div class="row" style="padding:6px 10px;border-radius:var(--radius-xs);background:var(--surface-2);gap:10px" data-label="${l.id}">
+          <span class="chip-label" style="background:${l.color};min-width:70px;text-align:center;padding:3px 8px;border-radius:4px;font-size:11.5px;font-weight:600;color:#fff">${escapeHtml(l.name || '•')}</span>
+          <input class="input" data-rename value="${escapeHtml(l.name)}" placeholder="Nom du label" style="padding:4px 8px;font-size:12.5px;flex:1" />
+          <button class="iconbtn" data-del title="Supprimer ce label" style="width:24px;height:24px">${icon('close', { size: 12 })}</button>
+        </div>`).join('') || '<span class="muted" style="font-size:12.5px">Aucun label créé.</span>';
+
+      labelsHost.addEventListener('change', async (e) => {
+        const row = e.target.closest('[data-label]');
+        if (row && e.target.matches('[data-rename]')) {
+          await api.updateLabel(row.dataset.label, { name: e.target.value });
+          await loadBoard(boardId);
+          toast('Label mis à jour', 'ok');
+        }
+      });
+      labelsHost.addEventListener('click', async (e) => {
+        if (e.target.closest('[data-del]')) {
+          const row = e.target.closest('[data-label]');
+          await api.deleteLabel(row.dataset.label);
+          await loadBoard(boardId);
+          renderSettings();
+        }
+      });
+    }
+
+    host.querySelector('#st-add-label')?.addEventListener('click', async () => {
+      const name = await promptDialog('Nom du label');
+      if (!name) return;
+      const color = LABEL_COLORS[state.labels.length % LABEL_COLORS.length];
+      await api.createLabel(boardId, { name, color });
       await loadBoard(boardId);
-      toast('Calendrier appliqué — recalcul CPM', 'ok');
-    };
-  });
-  host.querySelector('#st-add-calendar').onclick = async () => {
-    const name = await promptDialog('Nom du calendrier');
-    if (!name) return;
-    const holidays = await promptDialog('Jours fériés (JSON, ex. ["2027-01-01"])', '[]');
-    try {
-      await api.createCalendar({ name, holidays });
       renderSettings();
-    } catch (e) { toast(e.message, 'err'); }
-  };
+    });
+
+    // Champs personnalisés
+    const fieldsHost = host.querySelector('#st-fields');
+    if (fieldsHost) {
+      fieldsHost.innerHTML = state.fields.map((f) => `
+        <div class="row" style="padding:6px 10px;border-radius:var(--radius-xs);background:var(--surface-2);gap:10px">
+          <b style="font-size:13px">${escapeHtml(f.name)}</b>
+          <span class="badge" style="margin-left:auto">${f.kind}</span>
+          <button class="iconbtn" data-del-field="${f.id}" title="Supprimer ce champ" style="width:22px;height:22px">${icon('close', { size: 12 })}</button>
+        </div>`).join('') || '<span class="muted" style="font-size:12.5px">Aucun champ personnalisé configuré.</span>';
+
+      fieldsHost.querySelectorAll('[data-del-field]').forEach((b) => {
+        b.onclick = async () => { await api.deleteField(b.dataset.delField); await loadBoard(boardId); renderSettings(); };
+      });
+    }
+
+    host.querySelector('#st-add-field')?.addEventListener('click', async () => {
+      const name = await promptDialog('Nom du champ');
+      if (!name) return;
+      const kind = await promptDialog('Type (text, number, date, checkbox, select)', 'text');
+      if (!kind) return;
+      try {
+        await api.createField(boardId, { name, kind });
+        await loadBoard(boardId);
+        renderSettings();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+
+    // Automatisations
+    const autoHost = host.querySelector('#st-automations');
+    if (autoHost) {
+      renderAutomations(autoHost, boardId);
+      host.querySelector('#st-add-automation')?.addEventListener('click', () => openAutomationModal(boardId, null));
+      host.querySelector('#st-auto-runs-toggle')?.addEventListener('click', async () => {
+        const box = host.querySelector('#st-auto-runs');
+        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+        try {
+          const autos = await api.automations(boardId);
+          const runs = await api.boardAutomationRuns(boardId, 30);
+          const nameOf = (id) => autos.find((a) => a.id === id)?.name || id;
+          box.innerHTML = runs.map((r) => `
+            <div class="row" style="font-size:11.5px;padding:5px 8px;gap:8px;background:var(--surface-2);border-radius:var(--radius-xs);margin-bottom:4px">
+              <span class="badge" style="background:${r.ok ? 'var(--success)' : 'var(--error)'};color:#fff">${r.ok ? 'OK' : 'ERR'}</span>
+              <b style="white-space:nowrap">${escapeHtml(nameOf(r.automation_id))}</b>
+              <span class="muted" style="flex:1">${escapeHtml(r.trigger)} · ${escapeHtml((r.created_at || '').replace('T', ' ').slice(0, 19))}</span>
+              <span class="muted" style="max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.detail)}">${escapeHtml(r.detail)}</span>
+            </div>`).join('') || '<span class="muted" style="font-size:12px">Aucune exécution journalisée.</span>';
+          box.style.display = 'block';
+        } catch (e) { toast(e.message, 'err'); }
+      });
+    }
+  }
+
+  // =========================================================================
+  // Onglet Calendriers
+  // =========================================================================
+  const calHost = host.querySelector('#st-calendars');
+  if (calHost) {
+    api.calendars().then((cals) => {
+      calHost.innerHTML = cals.map((c) => `
+        <div class="row" style="padding:6px 10px;border-radius:var(--radius-xs);background:var(--surface-2);gap:10px">
+          <b style="flex:1;font-size:13px">${escapeHtml(c.name)}</b>
+          <span class="muted" style="font-size:12px">${c.hours_per_day} h / jour</span>
+          <button class="iconbtn" data-del-cal="${c.id}" ${c.id === 'default' ? 'disabled style="opacity:.3"' : ''} title="Supprimer ce calendrier" style="width:22px;height:22px">${icon('trash', { size: 12 })}</button>
+        </div>`).join('');
+      calHost.querySelectorAll('[data-del-cal]').forEach((b) => {
+        b.onclick = async () => {
+          try { await api.deleteCalendar(b.dataset.delCal); renderSettings(); }
+          catch (e) { toast(e.message, 'err'); }
+        };
+      });
+    }).catch(() => {});
+
+    host.querySelector('#st-add-calendar')?.addEventListener('click', async () => {
+      const name = await promptDialog('Nom du calendrier');
+      if (!name) return;
+      const holidays = await promptDialog('Jours fériés (JSON, ex. ["2027-01-01"])', '[]');
+      try {
+        await api.createCalendar({ name, holidays });
+        renderSettings();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  }
 }

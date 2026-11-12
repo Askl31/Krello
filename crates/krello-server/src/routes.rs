@@ -41,6 +41,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/views/{view}", put(set_view_settings))
         .route("/boards/{id}/views", get(get_view_settings))
         // settings / backup
+        .route("/settings/ui", get(get_ui_settings).put(put_ui_settings))
         .route("/settings/backup", get(get_backup_settings).put(put_backup_settings))
         .route("/settings/backup/run", post(run_backup_now))
         .route("/settings/backup/pick", post(pick_backup_dir))
@@ -959,7 +960,28 @@ async fn ai_checklist(State(state): State<SharedState>, Json(body): Json<Checkli
     Ok(ok_json(json!({ "items": items })))
 }
 
-// ---------- settings / backup ----------
+// ---------- settings / ui & backup ----------
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct UiSettingsBody {
+    theme: Option<String>,
+    style: Option<String>,
+    sidebar_collapsed: Option<bool>,
+}
+
+async fn get_ui_settings(State(state): State<SharedState>) -> ApiResult<Response> {
+    let s = state.service.ui_settings()?;
+    Ok(ok_json(serde_json::to_value(s).unwrap_or_default()))
+}
+
+async fn put_ui_settings(
+    State(state): State<SharedState>,
+    Json(b): Json<UiSettingsBody>,
+) -> ApiResult<Response> {
+    let s = state.service.set_ui_settings(b.theme, b.style, b.sidebar_collapsed)?;
+    Ok(ok_json(serde_json::to_value(s).unwrap_or_default()))
+}
 
 #[derive(Deserialize, Default)]
 #[serde(default)]

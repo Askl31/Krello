@@ -531,6 +531,42 @@ async fn backup_settings_and_run_flow() {
 }
 
 #[tokio::test]
+async fn ui_settings_flow() {
+    let app = test_krello_app();
+
+    // Defaults: theme "auto", style "standard", sidebar_collapsed false
+    let (status, s) = json_req(&app, "GET", "/api/v1/settings/ui", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["theme"], "auto");
+    assert_eq!(s["style"], "standard");
+    assert_eq!(s["sidebar_collapsed"], false);
+
+    // PUT: update theme and style
+    let (status, s) = json_req(
+        &app,
+        "PUT",
+        "/api/v1/settings/ui",
+        Some(serde_json::json!({
+            "theme": "dark",
+            "style": "translucent",
+            "sidebar_collapsed": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["theme"], "dark");
+    assert_eq!(s["style"], "translucent");
+    assert_eq!(s["sidebar_collapsed"], true);
+
+    // Verify GET reflects the changes
+    let (status, s) = json_req(&app, "GET", "/api/v1/settings/ui", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["theme"], "dark");
+    assert_eq!(s["style"], "translucent");
+    assert_eq!(s["sidebar_collapsed"], true);
+}
+
+#[tokio::test]
 async fn native_dir_picker_rejected_outside_tauri_app() {
     // Le flag KRELLO_NATIVE_DIALOG n'est posé que par l'app Tauri (process
     // partagé). En test / navigateur → erreur explicite, pas de fenêtre.
