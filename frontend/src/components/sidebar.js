@@ -108,15 +108,24 @@ export function renderSidebar(host) {
     const active = state.board?.id === b.id;
     const count = b.id === state.board?.id ? state.cards.filter((c) => !c.archived && !c.is_template).length : null;
     let color = 'var(--accent)';
+    let dotBg = 'var(--accent)';
     try {
       const c = JSON.parse(b.background || '{}');
-      if (typeof c.value === 'string' && /^#/.test(c.value)) color = c.value;
-      // Dégradé ou type inconnu → accent par défaut (les dégradés ne tiennent pas dans un point).
+      if (typeof c.value === 'string') {
+        if (/^#/.test(c.value) && c.value !== '#101828') {
+          color = c.value;
+          dotBg = c.value;
+        } else if (c.value.startsWith('linear-gradient') || c.value.startsWith('radial-gradient')) {
+          dotBg = c.value;
+          const m = c.value.match(/#(?:[0-9a-fA-F]{3}){1,2}/);
+          if (m) color = m[0];
+        }
+      }
     } catch { /* JSON invalide → accent par défaut */ }
     return `
       <div class="sb-board-row" data-board-row="${b.id}">
         <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
-          <span class="dot" style="background:${color};color:${color}"></span>
+          <span class="dot" style="background:${dotBg};color:${color}"></span>
           <span class="name">${escapeHtml(b.title)}</span>
           ${count !== null ? `<span class="count">${count}</span>` : ''}
         </button>

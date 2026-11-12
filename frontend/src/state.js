@@ -97,35 +97,32 @@ if (window.matchMedia) {
 export function applyBoardBackground(bg) {
   const main = document.getElementById('main');
   if (!main) return;
-  const isLight = document.documentElement.dataset.theme === 'light';
-  const isTranslucent = state.style === 'translucent';
 
   if (!bg) {
-    main.style.background = '';
+    main.style.removeProperty('background');
+    main.classList.remove('has-custom-bg');
     return;
   }
-  try {
-    const parsed = typeof bg === 'string' ? JSON.parse(bg) : bg;
-    // Si c'est la valeur par défaut du backend (#101828) ou "default" :
-    // en mode translucide ou clair, on laisse transparent pour laisser transparaître le fond aurore / studio
-    if (parsed.value === '#101828' || parsed.type === 'default' || !parsed.value) {
-      main.style.background = (isTranslucent || isLight) ? '' : '#101828';
-      return;
-    }
-    if (parsed.type === 'color' || parsed.type === 'gradient') {
-      main.style.background = parsed.value;
-      return;
-    }
-  } catch { /* ignore */ }
 
-  if (typeof bg === 'string') {
-    if (bg === '#101828') {
-      main.style.background = (isTranslucent || isLight) ? '' : '#101828';
-      return;
-    }
-    if (bg.startsWith('#') || bg.startsWith('linear-gradient')) {
-      main.style.background = bg;
-    }
+  let parsed = null;
+  try {
+    parsed = typeof bg === 'string' ? JSON.parse(bg) : bg;
+  } catch {
+    parsed = { value: bg };
+  }
+
+  const val = parsed?.value;
+  const isDefault = !val || val === '#101828' || parsed?.type === 'default' || val === 'default';
+
+  if (isDefault) {
+    main.style.removeProperty('background');
+    main.classList.remove('has-custom-bg');
+    return;
+  }
+
+  if (typeof val === 'string' && (val.startsWith('#') || val.startsWith('linear-gradient') || val.startsWith('radial-gradient') || val.startsWith('rgb'))) {
+    main.style.setProperty('background', val, 'important');
+    main.classList.add('has-custom-bg');
   }
 }
 

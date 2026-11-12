@@ -268,7 +268,7 @@ a:hover {
   flex-direction: column;
   background-color: var(--bg);
   background-image: radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 5%, transparent) 0%, transparent 40%);
-  transition: background-color var(--dur-base) ease;
+  transition: background 0.3s ease, background-color var(--dur-base) ease;
 }
 
 .view {
@@ -3306,9 +3306,17 @@ table.grid tr.done td:nth-child(2) {
 }
 
 /* Fond Aurora Mesh unifié sous toute l'interface en mode Translucide */
-html[data-style="translucent"] .shell,
-html[data-style="translucent"] .main {
+html[data-style="translucent"] .shell {
   background: transparent !important;
+}
+
+html[data-style="translucent"] .main {
+  background: transparent;
+  transition: background 0.3s ease;
+}
+
+html[data-style="translucent"] .main.has-custom-bg {
+  transition: background 0.3s ease;
 }
 
 /* Fond Aurora Mesh multi-points en mode Clair */

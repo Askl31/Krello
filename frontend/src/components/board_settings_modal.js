@@ -635,6 +635,21 @@ export async function openBoardSettingsModal(boardId, defaultTab = 'planning') {
       };
 
     } else if (tab === 'appearance') {
+      let currentVal = '';
+      let isDefault = true;
+      try {
+        const p = typeof board.background === 'string' ? JSON.parse(board.background) : board.background;
+        if (p && p.value && p.value !== '#101828' && p.type !== 'default' && p.value !== 'default') {
+          currentVal = p.value;
+          isDefault = false;
+        }
+      } catch {
+        if (board.background && board.background !== '#101828') {
+          currentVal = board.background;
+          isDefault = false;
+        }
+      }
+
       contentHost.innerHTML = `
         <div class="board-settings-card">
           <div class="board-settings-card-head">
@@ -646,12 +661,12 @@ export async function openBoardSettingsModal(boardId, defaultTab = 'planning') {
           <div class="swatches" id="bm-bg-swatches" style="gap:8px">
             <button data-bg="${escapeHtml(JSON.stringify({ type: 'default', value: '#101828' }))}"
                     title="Par défaut (s'adapte au mode clair ou sombre)"
-                    class="${!board.background || board.background.includes('#101828') ? 'sel' : ''}"
+                    class="${isDefault ? 'sel' : ''}"
                     style="background:var(--surface-2);border:1px dashed var(--border-strong);display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--muted);width:36px;height:36px;border-radius:var(--radius-xs);cursor:pointer">auto</button>
             ${BOARD_BACKGROUNDS.map((bg) => `
               <button data-bg="${escapeHtml(JSON.stringify({ type: 'gradient', value: bg.value }))}"
                       title="${bg.name}"
-                      class="${board.background?.includes(bg.value) ? 'sel' : ''}"
+                      class="${!isDefault && currentVal === bg.value ? 'sel' : ''}"
                       style="background:${bg.value};width:36px;height:36px;border-radius:var(--radius-xs);cursor:pointer"></button>
             `).join('')}
           </div>
@@ -662,16 +677,21 @@ export async function openBoardSettingsModal(boardId, defaultTab = 'planning') {
         const btn = e.target.closest('[data-bg]');
         if (!btn) return;
         const bg = btn.dataset.bg;
+        // Retour visuel immédiat
+        applyBoardBackground(bg);
+        contentHost.querySelectorAll('#bm-bg-swatches [data-bg]').forEach((b) => b.classList.remove('sel'));
+        btn.classList.add('sel');
         try {
+          if (state.board && state.board.id === boardId) {
+            state.board.background = bg;
+          }
           await api.updateBoard(boardId, { background: bg });
           await loadBoard(boardId);
-          applyBoardBackground(bg);
-          contentHost.querySelectorAll('#bm-bg-swatches [data-bg]').forEach((b) => b.classList.remove('sel'));
-          btn.classList.add('sel');
           const sb = document.getElementById('sidebar');
           if (sb) import('./sidebar.js').then((m) => m.renderSidebar(sb));
           toast('Ambiance du tableau modifiée', 'ok');
         } catch (err) {
+          applyBoardBackground(state.board?.background);
           toast(err.message, 'err');
         }
       });
