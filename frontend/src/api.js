@@ -124,6 +124,10 @@ export const api = {
   saveBackupSettings: (s) => api.put('/api/v1/settings/backup', s),
   runBackup: () => api.post('/api/v1/settings/backup/run'),
   pickBackupDir: () => api.post('/api/v1/settings/backup/pick'),
+  system: () => api.get('/api/v1/system'),
+  deepLink: (url) => api.post('/api/v1/deep-link', { url }),
+  siriPack: (dir) => api.post('/api/v1/macos/siri-pack', { dir }),
+  pickSiriPackDir: () => api.post('/api/v1/macos/siri-pack/pick'),
 
   search: (q, boardId) =>
     api.get(`/api/v1/search?q=${encodeURIComponent(q)}${boardId ? `&board_id=${boardId}` : ''}`),

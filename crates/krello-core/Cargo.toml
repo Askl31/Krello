@@ -14,6 +14,7 @@ uuid.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 rusqlite.workspace = true
+plist.workspace = true
 krello-ai-helper = { path = "../krello-ai-helper" }
 
 [dev-dependencies]

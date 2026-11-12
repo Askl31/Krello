@@ -1,6 +1,7 @@
 //! Krello server library: router construction shared by the binary, the
 //! Tauri app and the integration tests.
 
+pub mod cli;
 pub mod error;
 pub mod routes;
 pub mod state;

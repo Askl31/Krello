@@ -5,6 +5,7 @@ import { emit } from './ws.js';
 
 export const state = {
   boards: [],
+  system: null,     // GET /api/v1/system (platform, native_app, exe)
   aiStatus: null,
   board: null,        // board courant
   lists: [],

@@ -476,7 +476,9 @@ export function renderSettings() {
   const host = document.querySelector('.view');
   if (!host) return;
   const board = state.board;
-  const tab = state.settingsTab || 'appearance';
+  const isMac = state.system?.platform === 'macos';
+  let tab = state.settingsTab || 'appearance';
+  if (!isMac && tab === 'macos') tab = 'appearance';
 
   let tabContentHtml = '';
 
@@ -838,6 +840,44 @@ export function renderSettings() {
         </div>
         <div id="st-calendars" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>`;
+  } else if (tab === 'macos') {
+    tabContentHtml = `
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('ai', { size: 18, className: 'muted' })} <span>Siri &amp; Spotlight — ajout rapide de tâches</span></h3>
+            <p class="settings-card-desc">
+              Générez des raccourcis macOS (un par liste) pour créer une tâche dans une liste déterminée
+              depuis <b>Spotlight</b> (⌘Espace → « Krello ») ou <b>Siri</b> (« Ajouter à Siri » dans l'app
+              Raccourcis, puis dictez la tâche), sans ouvrir Krello.
+            </p>
+          </div>
+        </div>
+        <div class="field">
+          <label>Dossier de génération des raccourcis</label>
+          <div class="row" style="gap:8px">
+            <input class="input" id="st-siri-dir" placeholder="/Users/moi/Raccourcis-Krello" style="flex:1" />
+            <button class="btn ghost sm" id="st-siri-browse" style="flex:none;display:none">📁 Parcourir…</button>
+            <button class="btn primary sm" id="st-siri-gen" style="flex:none">${icon('check', { size: 13 })} <span>Générer les raccourcis</span></button>
+          </div>
+          <p class="muted" style="font-size:12px;margin-top:6px">
+            Écrit un fichier <code>.shortcut</code> par liste + <code>LISEZMOI.txt</code> dans ce dossier.
+            Importez chaque fichier par double-clic (« Ajouter le raccourci »), puis dans l'app Raccourcis :
+            « Ajouter à Siri » avec la phrase de votre choix. Les raccourcis apparaissent aussi dans Spotlight.
+          </p>
+        </div>
+        <div id="st-siri-status" style="margin-top:12px"><span class="muted">…</span></div>
+      </div>
+
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <h3 class="settings-card-title">${icon('settings', { size: 18, className: 'muted' })} <span>Ligne de commande (repli / scripts)</span></h3>
+            <p class="settings-card-desc">Binaire courant : <code id="st-siri-exe" class="muted"></code></p>
+          </div>
+        </div>
+        <div id="st-siri-lists" style="display:flex;flex-direction:column;gap:6px"><span class="muted">Chargement…</span></div>
+      </div>`;
   }
 
   host.innerHTML = `
@@ -866,6 +906,9 @@ export function renderSettings() {
         <button class="settings-tab-btn ${tab === 'backups' ? 'active' : ''}" data-tab="backups">
           ${icon('import', { size: 15 })} <span>Sauvegardes</span>
         </button>
+        ${isMac ? `<button class="settings-tab-btn ${tab === 'macos' ? 'active' : ''}" data-tab="macos">
+          ${icon('ai', { size: 15 })} <span>macOS</span>
+        </button>` : ''}
       </div>
 
       <div class="settings-content">
@@ -1230,5 +1273,76 @@ export function renderSettings() {
         renderSettings();
       } catch (e) { toast(e.message, 'err'); }
     });
+  }
+
+  // =========================================================================
+  // Onglet macOS : raccourcis Siri/Spotlight + commandes CLI par liste
+  // =========================================================================
+  if (isMac) {
+    const stSiriDir = host.querySelector('#st-siri-dir');
+    const stSiriBrowse = host.querySelector('#st-siri-browse');
+    const stSiriGen = host.querySelector('#st-siri-gen');
+    const stSiriStatus = host.querySelector('#st-siri-status');
+    const stSiriLists = host.querySelector('#st-siri-lists');
+    const stSiriExe = host.querySelector('#st-siri-exe');
+    if (stSiriDir) {
+      const inNativeApp = !!window.__TAURI_INTERNALS__;
+      if (stSiriBrowse && inNativeApp) {
+        stSiriBrowse.style.display = '';
+        stSiriBrowse.addEventListener('click', async () => {
+          try {
+            const r = await api.pickSiriPackDir();
+            if (r.dir) stSiriDir.value = r.dir;
+          } catch (e) { toast(e.message, 'err'); }
+        });
+      }
+      if (stSiriExe) stSiriExe.textContent = state.system?.exe || '';
+      stSiriGen?.addEventListener('click', async () => {
+        const dir = (stSiriDir.value || '').trim();
+        if (!dir) { toast('Indiquez d’abord le dossier de génération', 'err'); return; }
+        try {
+          stSiriStatus.innerHTML = '<span class="muted">Génération…</span>';
+          const r = await api.siriPack(dir);
+          stSiriStatus.innerHTML = `<span class="badge done">● ${r.files.length} fichier(s) écrit(s) dans ${escapeHtml(r.dir)}</span>
+            <ul style="margin:6px 0 0 18px">${r.files.map((f) => `<li class="muted" style="font-size:12px">${escapeHtml(f)}</li>`).join('')}</ul>`;
+          toast(`${r.files.length} fichiers générés — importez-les par double-clic`, 'ok');
+        } catch (e) {
+          stSiriStatus.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+          toast(e.message, 'err');
+        }
+      });
+    }
+    if (stSiriLists) {
+      (async () => {
+        try {
+          const exe = state.system?.exe || 'krello';
+          const boards = await api.boards();
+          const rows = [];
+          for (const b of boards) {
+            const lists = await api.lists(b.id);
+            for (const l of lists) {
+              const cmd = `"${exe}" task add --title "…" --list ${JSON.stringify(l.title)}`;
+              rows.push(`<div class="row" style="gap:8px;align-items:center;padding:4px 6px">
+                <span class="muted" style="font-size:11.5px;flex:none">${escapeHtml(b.title)}</span>
+                <b style="font-size:13px;flex:none">${escapeHtml(l.title)}</b>
+                <code class="muted" style="flex:1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(cmd)}">${escapeHtml(cmd)}</code>
+                <button class="btn ghost sm" data-copy="${escapeHtml(cmd)}" style="flex:none" title="Copier la commande">${icon('copy', { size: 13 })}</button>
+              </div>`);
+            }
+          }
+          stSiriLists.innerHTML = rows.length ? rows.join('') : '<span class="muted">Aucune liste active — créez-en une dans un tableau.</span>';
+          stSiriLists.querySelectorAll('[data-copy]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              try {
+                await navigator.clipboard.writeText(btn.dataset.copy);
+                toast('Commande copiée dans le presse-papiers', 'ok');
+              } catch { toast('Copie impossible (presse-papiers indisponible)', 'err'); }
+            });
+          });
+        } catch (e) {
+          stSiriLists.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+        }
+      })();
+    }
   }
 }

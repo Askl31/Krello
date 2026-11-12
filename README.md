@@ -38,6 +38,11 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
 - **Apple Intelligence** (macOS 15.1+, Apple Silicon) : carte/plan de projet en
   langage naturel, résumés, priorités suggérées, reformulation, checklists —
   100 % on-device. Documenté dans [`docs/APPLE_INTELLIGENCE.md`](docs/APPLE_INTELLIGENCE.md).
+- **Siri & Spotlight (macOS)** : ajout rapide d'une tâche dans une liste déterminée
+  depuis Spotlight (⌘Espace) ou Siri — pack de raccourcis `.shortcut` généré depuis
+  les Paramètres (un par liste), deep link `krello://` + CLI `krello task add` en
+  repli. Documenté dans [`docs/MACOS_SIRI_SPOTLIGHT.md`](docs/MACOS_SIRI_SPOTLIGHT.md).
+  Windows inchangé.
 
 ## Compilation & lancement
 
@@ -51,7 +56,7 @@ cargo test --workspace
 # binaire CLI (serveur + interface, frontend embarqué)
 cargo build --release -p krello-server
 ./target/release/krello --open          # http://127.0.0.1:8787
-./target/release/krello --help          # --db --port --token --frontend --open --no-ai
+./target/release/krello --help          # --db --port --token --frontend --open --no-ai ; krello task add --title "…" --list "…"
 
 # app native macOS (.app + .dmg) — nécessite npm une seule fois
 npm i -g @tauri-apps/cli
@@ -106,6 +111,7 @@ frontend/               interface ES modules sans build (français, thèmes)
 docs/PLAN.md            plan complet (features, architecture, décisions)
 docs/API.md             référence API
 docs/APPLE_INTELLIGENCE.md  analyse pertinence/faisabilité + implémentation
+docs/MACOS_SIRI_SPOTLIGHT.md  plan & design Siri/Spotlight (macOS)
 .github/workflows/build.yml  CI macOS + Windows
 ```
 
@@ -123,8 +129,27 @@ import/export/automations, IA, intégration HTTP, rappels, récurrence, tracking
 duplication de listes, garde Host, sauvegardes) : `cargo test --workspace`.
 
 ## Journal des modifications
+### v0.1.7 — Siri & Spotlight (macOS) : ajout rapide de tâches
+
+- **Raccourcis Siri/Spotlight générés par l'app** : Paramètres → onglet « macOS » →
+  choisir un dossier (sélecteur natif Finder dans l'app) → un fichier `.shortcut`
+  par liste + `LISEZMOI.txt`. Double-clic pour importer dans Raccourcis, puis
+  « Ajouter à Siri » ; les raccourcis sont aussi indexés par **Spotlight** (⌘Espace).
+- **Deep link `krello://task/new?list=…&title=…`** enregistré sur macOS uniquement
+  (`tauri-plugin-deep-link`, `tauri.macos.conf.json`, capability macOS) : l'app
+  crée la carte via `POST /api/v1/deep-link` (événement WS → UI live, annulable ⌘Z)
+  ou ouvre une modale pré-remplie si le titre manque (`needs_input`, `confirm=1`).
+  Le titre dicté passe par un fichier inbox `<data>/siri-inbox.txt` (lu puis supprimé).
+- **CLI `task add`** (`krello` et binaire de l'app) :
+  `task add --title "…" [--list "…"] [--board "…"] [--db PATH]` (`--title -` = stdin),
+  écrit directement dans la SQLite (WAL) — repli du raccourci et usage Terminal.
+- Nouveaux endpoints : `GET /api/v1/system`, `POST /api/v1/deep-link`,
+  `POST /api/v1/macos/siri-pack` (+ `/pick`, 400 hors macOS / hors app native).
+- **Windows inchangé** : plugin, config et capability enregistrés uniquement sur
+  la cible macOS ; l'onglet macOS est masqué ailleurs.
 
 ### v0.1.6 — historique par carte + suivi du temps
+
 
 - **Historique par carte** : `GET /boards/{id}/activity?card_id=` (filtre SQL
   `card_id`) + section « Activité » dans la modale carte (libellés FR des kinds,

@@ -27,3 +27,4 @@ open = "5"
 http-body-util = "0.1"
 
 [dev-dependencies]
+plist.workspace = true

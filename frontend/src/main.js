@@ -14,6 +14,7 @@ import { renderTimeline } from './views/timeline.js';
 import { renderTable } from './views/table.js';
 import { renderDashboard } from './views/dashboard.js';
 import { renderSettings } from './views/settings.js';
+import { initDeepLink } from './deeplink.js';
 import { loadViewSettings } from './views/view_helpers.js';
 import { icon } from './icons.js';
 
@@ -37,6 +38,15 @@ api.aiStatus()
   })
   .catch(() => {
     state.aiStatus = { available: false, reason: 'unreachable' };
+  });
+
+// Infos système (plateforme, binaire courant) — pilote l'onglet macOS.
+api.system()
+  .then((s) => {
+    state.system = s;
+  })
+  .catch(() => {
+    state.system = null;
   });
 
 function shellHtml() {
@@ -264,5 +274,6 @@ new MutationObserver((muts) => {
 
 emit('app.boot');
 startWs();
+initDeepLink();
 initPalette();
 startRouter(renderRoute);

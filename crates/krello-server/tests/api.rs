@@ -579,3 +579,135 @@ async fn native_dir_picker_rejected_outside_tauri_app() {
         "message attendu, reçu: {body}"
     );
 }
+
+#[tokio::test]
+async fn system_info_endpoint() {
+    let app = test_krello_app();
+    let (status, body) = json_req(&app, "GET", "/api/v1/system", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["platform"].as_str().unwrap() == "macos"
+        || body["platform"].as_str().unwrap() == "windows"
+        || body["platform"].as_str().unwrap() == "linux");
+    assert!(body["exe"].is_string());
+    assert!(body["native_app"].is_boolean());
+}
+
+#[tokio::test]
+async fn deep_link_creates_card_and_needs_input() {
+    let app = test_krello_app();
+    // board + liste
+    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "Perso" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let board_id = board["id"].as_str().unwrap().to_string();
+    let (status, list) = json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "Courses" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let list_id = list["id"].as_str().unwrap().to_string();
+
+    // deep link avec titre encodé → création directe
+    let (status, body) = json_req(
+        &app,
+        "POST",
+        "/api/v1/deep-link",
+        Some(serde_json::json!({ "url": "krello://task/new?list=Courses&title=Acheter%20du%20lait" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["kind"], "created");
+    assert_eq!(body["card"]["title"], "Acheter du lait");
+    assert_eq!(body["card"]["list_id"], list_id);
+    assert_eq!(body["list"]["title"], "Courses");
+
+    // la carte est bien en base
+    let (status, cards) = json_req(&app, "GET", &format!("/api/v1/boards/{board_id}/cards"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cards.as_array().unwrap().len(), 1);
+
+    // sans titre → needs_input
+    let (status, body) = json_req(
+        &app,
+        "POST",
+        "/api/v1/deep-link",
+        Some(serde_json::json!({ "url": "krello://task/new?list=Courses" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["kind"], "needs_input");
+    assert_eq!(body["list"]["id"], list_id);
+
+    // confirm=1 → needs_input même avec titre
+    let (status, body) = json_req(
+        &app,
+        "POST",
+        "/api/v1/deep-link",
+        Some(serde_json::json!({ "url": "krello://task/new?list=Courses&title=X&confirm=1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["kind"], "needs_input");
+    assert_eq!(body["title"], "X");
+
+    // liste inconnue → 404
+    let (status, _body) = json_req(
+        &app,
+        "POST",
+        "/api/v1/deep-link",
+        Some(serde_json::json!({ "url": "krello://task/new?list=Nulle%20part&title=X" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // mauvais scheme → 400
+    let (status, _body) = json_req(
+        &app,
+        "POST",
+        "/api/v1/deep-link",
+        Some(serde_json::json!({ "url": "https://task/new?list=Courses&title=X" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn siri_pack_writes_shortcut_files_on_macos() {
+    let app = test_krello_app();
+    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "Perso" }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let board_id = board["id"].as_str().unwrap().to_string();
+    json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "Courses" }))).await;
+    json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "À faire" }))).await;
+
+    let dir = std::env::temp_dir().join(format!("krello-siri-pack-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (status, body) = json_req(&app, "POST", "/api/v1/macos/siri-pack", Some(serde_json::json!({ "dir": dir.to_string_lossy() }))).await;
+    if cfg!(target_os = "macos") {
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        let files = body["files"].as_array().unwrap();
+        assert_eq!(files.len(), 3, "2 raccourcis + LISEZMOI: {body}");
+        let names: Vec<String> = files.iter().map(|f| f.as_str().unwrap().to_string()).collect();
+        assert!(names.iter().any(|n| n.ends_with("Krello · Courses.shortcut")));
+        assert!(names.iter().any(|n| n.ends_with("Krello · À faire.shortcut")));
+        assert!(names.iter().any(|n| n.ends_with("LISEZMOI.txt")));
+        // chaque .shortcut est un plist binaire valide avec les 2 actions
+        for f in &names {
+            if f.ends_with(".shortcut") {
+                let bytes = std::fs::read(f).unwrap();
+                let v = plist::Value::from_reader(std::io::Cursor::new(&bytes)).unwrap();
+                let actions = v.as_dictionary().unwrap().get("WFWorkflowActions").unwrap().as_array().unwrap();
+                assert_eq!(actions.len(), 2);
+            }
+        }
+    } else {
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["message"].as_str().unwrap().contains("macOS"));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn siri_pack_pick_rejected_outside_tauri_app() {
+    std::env::remove_var("KRELLO_NATIVE_DIALOG");
+    let app = test_krello_app();
+    let (status, body) = json_req(&app, "POST", "/api/v1/macos/siri-pack/pick", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["message"].as_str().unwrap().contains("app Krello"));
+}

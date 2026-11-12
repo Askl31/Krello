@@ -52,6 +52,11 @@ fn setup_dock_icon() {
 }
 
 fn main() {
+    // Sous-commandes CLI (`Krello task add …` depuis un Terminal/script) :
+    // même base par défaut que l'app, exécutées hors fenêtre native.
+    if krello_server::cli::try_run_cli() {
+        return;
+    }
     #[cfg(target_os = "macos")]
     setup_dock_icon();
     // Le serveur in-process partage ce processus : la fenêtre native existe,
@@ -62,7 +67,14 @@ fn main() {
     let db = Db::open(&db_path).expect("ouverture de la base Krello impossible");
     let service = Arc::new(Service::new(db, data_dir.join("attachments")));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // Deep link `krello://` (ajout rapide via Siri/Spotlight) : enregistré sur
+    // macOS uniquement — la partie Windows reste strictement inchangée.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_plugin_deep_link::init());
+    }
+    builder
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             setup_dock_icon();

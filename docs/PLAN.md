@@ -36,6 +36,15 @@ résumé de board, suggestions de priorités (avec raisons), reformulation, gén
 Tous **on-device** via le framework Foundation Models, appelé par un **helper Swift embarqué**
 (JSON-lines sur stdin/stdout), fallback gracieux si indisponible.
 
+### 1.4 Siri & Spotlight (macOS) — voir `docs/MACOS_SIRI_SPOTLIGHT.md`
+
+Ajout rapide d'une tâche dans une liste déterminée depuis **Spotlight** (⌘Espace)
+ou **Siri** (phrase personnalisée) : Krello génère un pack de raccourcis
+`.shortcut` (un par liste) qui déposent le titre dicté/saisi dans une inbox puis
+ouvrent le deep link `krello://task/new?list=…` (app Tauri, plugin deep-link
+macOS uniquement) — repli : CLI `krello task add --title … --list …` écrivant
+directement dans la SQLite. Windows inchangé (plugin/config/capability macOS only).
+
 ## 2. Architecture
 
 ```

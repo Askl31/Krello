@@ -18,6 +18,10 @@ async fn main() {
                 .unwrap_or_else(|_| "krello_server=info,tower_http=warn".into()),
         )
         .init();
+    // Sous-commandes CLI (`krello task add …`) : exécutées hors serveur, puis exit.
+    if krello_server::cli::try_run_cli() {
+        return;
+    }
 
     // Args: --db PATH --port N --token T --frontend DIR --open --no-ai
     let mut db_path = default_db_path();
@@ -42,7 +46,7 @@ async fn main() {
             }
             other => {
                 eprintln!(
-                    "Usage: krello [--db PATH] [--port N] [--token T] [--frontend DIR] [--open] [--no-ai]\nArgument inconnu: {other}"
+                    "Usage: krello [--db PATH] [--port N] [--token T] [--frontend DIR] [--open] [--no-ai]\n       krello task add --title \"…\" [--list \"…\"] [--board \"…\"] [--db PATH]\nArgument inconnu: {other}"
                 );
                 std::process::exit(2);
             }

@@ -45,6 +45,11 @@ pub fn router(state: SharedState) -> Router {
         .route("/settings/backup", get(get_backup_settings).put(put_backup_settings))
         .route("/settings/backup/run", post(run_backup_now))
         .route("/settings/backup/pick", post(pick_backup_dir))
+        // quick-add macOS (Siri/Spotlight) + infos système
+        .route("/system", get(system_info))
+        .route("/deep-link", post(deep_link_route))
+        .route("/macos/siri-pack", post(siri_pack))
+        .route("/macos/siri-pack/pick", post(pick_siri_pack_dir))
         // lists
         .route("/lists/{id}", patch(update_list).delete(delete_list).get(get_list))
         .route("/lists/{id}/count", get(list_card_count))
@@ -1030,6 +1035,99 @@ async fn pick_backup_dir() -> ApiResult<Response> {
     }
     let picked = rfd::AsyncFileDialog::new()
         .set_title("Choisir le répertoire de sauvegarde")
+        .pick_folder()
+        .await
+        .map(|h| h.path().to_string_lossy().into_owned());
+    Ok(ok_json(json!({ "dir": picked })))
+}
+
+// ---------- system / deep link / pack Siri-Spotlight (macOS) ----------
+
+async fn system_info() -> ApiResult<Response> {
+    Ok(ok_json(json!({
+        "platform": if cfg!(target_os = "macos") { "macos" } else if cfg!(target_os = "windows") { "windows" } else { "linux" },
+        "native_app": std::env::var("KRELLO_NATIVE_DIALOG").as_deref() == Ok("1"),
+        "exe": std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()),
+        "version": env!("CARGO_PKG_VERSION"),
+    })))
+}
+
+#[derive(Deserialize)]
+struct DeepLinkBody {
+    url: String,
+}
+
+/// Traite un deep link `krello://…` reçu par l'app (Siri/Spotlight) : crée la
+/// carte (événement WS émis → l'UI se met à jour) ou renvoie `needs_input`
+/// avec board/liste/titre pour la modale de confirmation.
+async fn deep_link_route(
+    State(state): State<SharedState>,
+    Json(b): Json<DeepLinkBody>,
+) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let out = blocking(move || service.handle_deep_link(&b.url)).await?;
+    let v = serde_json::to_value(&out)
+        .map_err(krello_core::Error::from)
+        .map_err(ApiError)?;
+    Ok(ok_json(v))
+}
+
+#[derive(Deserialize)]
+struct SiriPackBody {
+    dir: String,
+}
+
+/// Génère le pack de raccourcis Siri/Spotlight (macOS uniquement) : un
+/// `.shortcut` par liste active + `LISEZMOI.txt` dans `dir`.
+async fn siri_pack(
+    State(state): State<SharedState>,
+    Json(b): Json<SiriPackBody>,
+) -> ApiResult<Response> {
+    if !cfg!(target_os = "macos") {
+        return Err(ApiError(krello_core::Error::Validation(
+            "la génération de raccourcis Siri/Spotlight est réservée à macOS".into(),
+        )));
+    }
+    let service = state.service.clone();
+    let dir = std::path::PathBuf::from(&b.dir);
+    let files = blocking(move || {
+        let boards = service.list_boards(false)?;
+        let mut targets = Vec::new();
+        for board in boards {
+            for l in service.list_lists(&board.id, false)? {
+                targets.push(krello_core::shortcut::ShortcutTarget {
+                    board_title: board.title.clone(),
+                    list_title: l.title.clone(),
+                });
+            }
+        }
+        if targets.is_empty() {
+            return Err(krello_core::Error::Validation(
+                "aucune liste active : créez d'abord une liste dans un board".into(),
+            ));
+        }
+        let exe = std::env::current_exe()?;
+        let data_dir = service.data_dir();
+        let db_path = data_dir.join("krello.db");
+        krello_core::shortcut::write_pack(&dir, &targets, &exe, &data_dir, &db_path)
+    })
+    .await?;
+    Ok(ok_json(json!({
+        "dir": b.dir,
+        "files": files.iter().map(|f| f.to_string_lossy()).collect::<Vec<_>>(),
+    })))
+}
+
+/// Sélecteur natif de dossier pour le pack Siri (app Krello uniquement, même
+/// garde que `/settings/backup/pick`).
+async fn pick_siri_pack_dir() -> ApiResult<Response> {
+    if std::env::var("KRELLO_NATIVE_DIALOG").as_deref() != Ok("1") {
+        return Err(ApiError(krello_core::Error::Validation(
+            "le sélecteur de répertoire natif n'est disponible que dans l'app Krello (fenêtre native) — saisissez le chemin manuellement en mode navigateur".into(),
+        )));
+    }
+    let picked = rfd::AsyncFileDialog::new()
+        .set_title("Choisir le dossier où générer les raccourcis Siri/Spotlight")
         .pick_folder()
         .await
         .map(|h| h.path().to_string_lossy().into_owned());

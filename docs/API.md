@@ -83,6 +83,19 @@ compacte, ouvrable telle quelle) ; rotation automatique au-delà de `keep`.
 Le serveur vérifie chaque minute : sauvegarde dès que `interval_hours` est écoulé.
 Rien n'est undoable ni journalisé dans `activity` (réglages globaux).
 
+## Système & quick-add macOS (Siri / Spotlight) — voir `docs/MACOS_SIRI_SPOTLIGHT.md`
+| | |
+|---|---|
+| `GET /system` | `{platform: "macos"\|"windows"\|"linux", native_app, exe, version}` — pilote l'affichage de l'onglet macOS |
+| `POST /deep-link` | `{url: "krello://task/new?list=…&board=…&title=…&confirm=1"}` → `{kind:"created", card, list, board}` ou `{kind:"needs_input", board, list, title}` ; 400 scheme/action invalide, 404 liste introuvable. Le titre peut aussi venir du fichier inbox `<data>/siri-inbox.txt` (déposé par les raccourcis) |
+| `POST /macos/siri-pack` | `{dir}` → écrit un `.shortcut` par liste active + `LISEZMOI.txt` → `{dir, files[]}` ; **400 hors macOS** |
+| `POST /macos/siri-pack/pick` | sélecteur natif de dossier → `{dir}` ; **400 hors app native** |
+
+CLI (binaire `krello` et binaire de l'app) : `task add --title "…" [--list "…"] [--board "…"] [--db PATH]`
+(`--title -` = stdin) → écrit la carte directement dans la base (WAL, coexiste avec l'app ouverte), imprime `OK …`, code 0/1/2.
+
+Deep link enregistré sur macOS uniquement (Tauri `krello://`, plugin deep-link) ; Windows inchangé.
+
 ## Recherche & import
 `GET /search?q=&board_id=&list_id=&label_id=&priority=&due_before=&due_after=&has_due=` (FTS5 + filtres)
 `POST /import/trello` (body = JSON export Trello) · `POST /import/krello` (round-trip export).

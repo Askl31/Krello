@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod db;
+pub mod deeplink;
 pub mod error;
 pub mod events;
 pub mod exim;
@@ -10,6 +11,7 @@ pub mod models;
 pub mod scheduler;
 pub mod search;
 pub mod service;
+pub mod shortcut;
 pub mod time;
 pub mod undo;
 
