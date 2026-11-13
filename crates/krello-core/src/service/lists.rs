@@ -178,6 +178,68 @@ impl Service {
         Ok(after)
     }
 
+    /// Reorder the board's active lists to exactly `order` (every active list
+    /// id, once). One transaction, one undo entry, one event — unlike
+    /// per-list PATCH, no intermediate renormalization can reshuffle the
+    /// sequence mid-way (tie-break `created_at` used to restore the old order).
+    pub fn reorder_lists(&self, board_id: &str, order: Vec<String>) -> Result<()> {
+        if order.is_empty() {
+            return Err(Error::Validation("ordre vide".into()));
+        }
+        let mut uniq = order.clone();
+        uniq.sort();
+        uniq.dedup();
+        if uniq.len() != order.len() {
+            return Err(Error::Validation("doublons dans l'ordre des listes".into()));
+        }
+        let db = self.lock_db()?;
+        query_board(&db.conn, board_id)
+            ?.ok_or_else(|| Error::NotFound(format!("board {board_id}")))?;
+        let active: Vec<List> = {
+            let mut stmt = db.conn.prepare_cached(
+                "SELECT * FROM lists WHERE board_id=?1 AND archived=0 ORDER BY position",
+            )?;
+            let v = stmt
+                .query_map([board_id], row_list)?
+                .collect::<rusqlite::Result<_>>()?;
+            v
+        };
+        let active_ids: std::collections::HashSet<&String> = active.iter().map(|l| &l.id).collect();
+        let order_set: std::collections::HashSet<&String> = order.iter().collect();
+        if order_set != active_ids {
+            return Err(Error::Validation(
+                "l'ordre doit contenir exactement les listes actives du board".into(),
+            ));
+        }
+        let mut actions = Vec::with_capacity(order.len());
+        for (i, id) in order.iter().enumerate() {
+            let Some(before) = active.iter().find(|l| l.id == *id) else { continue };
+            if before.position == i as f64 {
+                continue; // déjà en place
+            }
+            let mut after = before.clone();
+            after.position = i as f64;
+            after.updated_at = now_updated();
+            update_list_row(&db.conn, &after)?;
+            actions.push(UndoAction::ListUpdated {
+                before: before.clone(),
+                after,
+            });
+        }
+        drop(db);
+        if !actions.is_empty() {
+            self.push_undo(UndoEntry {
+                label: "Réordonnancement des listes".into(),
+                actions,
+            });
+        }
+        self.emit(Event::ListUpdated {
+            board_id: board_id.to_string(),
+            list_id: order.first().cloned().unwrap_or_default(),
+        });
+        Ok(())
+    }
+
     pub fn delete_list(&self, id: &str) -> Result<()> {
         let db = self.lock_db()?;
         let list =

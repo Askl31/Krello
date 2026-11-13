@@ -1375,17 +1375,15 @@ textarea.input {
   background: var(--accent);
 }
 
-/* Indicateur de drop vertical (réordonnancement des listes dans le board) */
-.drop-line.vertical {
-  width: 3px;
-  height: auto;
-  align-self: stretch;
-  margin: 6px 2px;
+/* Indicateur de drop des listes : bord latéral en box-shadow inset —
+   zéro décalage de layout (une drop-line insérée dans le flux flex décalait
+   les colonnes pendant le drag et faisait rater le drop) */
+.list.drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent), var(--shadow-md);
 }
 
-.drop-line.vertical::before {
-  left: -3px;
-  top: -4px;
+.list.drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent), var(--shadow-md);
 }
 
 /* Poignée de drag des listes (affordance du réordonnancement) */

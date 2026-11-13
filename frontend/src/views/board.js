@@ -369,12 +369,11 @@ function listEl(list) {
       others.splice(insertIdx, 0, moving);
       const addBtn = boardEl.querySelector('.list-add');
       for (const n of others) boardEl.insertBefore(n, addBtn);
-      // positions : ordre d'affichage
-      const ids = others.map((n) => n.dataset.list);
-      for (let i = 0; i < ids.length; i++) {
-        const l = visibleLists().find((x) => x.id === ids[i]);
-        if (l && l.position !== i) await api.updateList(l.id, { position: i });
-      }
+      // Un SEUL appel atomique : les PATCH individuels déclenchent une
+      // renormalisation par created_at qui restaurait l'ancien ordre.
+      try {
+        await api.reorderLists(state.board.id, others.map((n) => n.dataset.list));
+      } catch (e) { toast(e.message, 'err'); }
       reload();
     },
   });

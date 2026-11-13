@@ -39,27 +39,18 @@ function updateDropIndicator(targetEl, clientY, sourceEl) {
   }
 }
 
-/// Indicateur de drop VERTICAL pour les listes (colonne cible dans le board) :
-/// s'insère avant la liste sous le curseur, sinon après la dernière (avant le
-/// bouton « Ajouter une liste »).
+/// Indicateur de drop pour les listes : marque la colonne cible avec
+/// `drop-before`/`drop-after` (box-shadow inset → ZÉRO décalage de layout ;
+/// une drop-line insérée dans le flux flex décalait les colonnes pendant le
+/// drag et faisait rater le hit-test au drop).
 function updateListDropIndicator(targetEl, clientX, sourceEl) {
-  const boardEl = document.querySelector('#board');
-  if (!boardEl) return;
-  let dropLine = document.querySelector('.drop-line');
-  if (!dropLine) {
-    dropLine = document.createElement('div');
-    dropLine.className = 'drop-line vertical';
-  }
-  const lists = [...boardEl.querySelectorAll('.list')].filter((l) => l !== sourceEl);
-  const next = lists.find((l) => {
-    const box = l.getBoundingClientRect();
-    return clientX < box.left + box.width / 2;
+  document.querySelectorAll('#board .list').forEach((l) => {
+    if (l !== targetEl) l.classList.remove('drop-before', 'drop-after');
   });
-  if (next) {
-    boardEl.insertBefore(dropLine, next);
-  } else {
-    boardEl.insertBefore(dropLine, boardEl.querySelector('.list-add'));
-  }
+  if (!targetEl || !targetEl.classList.contains('list')) return;
+  const box = targetEl.getBoundingClientRect();
+  targetEl.classList.toggle('drop-after', clientX > box.left + box.width / 2);
+  targetEl.classList.toggle('drop-before', clientX <= box.left + box.width / 2);
 }
 
 /**
@@ -99,6 +90,8 @@ export function beginDrag(el, opts, ev) {
     window.removeEventListener('pointercancel', onCancel);
     window.removeEventListener('keydown', onEsc);
     document.querySelector('.drop-line')?.remove();
+    document.querySelectorAll('#board .drop-before, #board .drop-after')
+      .forEach((l) => l.classList.remove('drop-before', 'drop-after'));
   };
 
   const endDrag = (e, cancelled) => {

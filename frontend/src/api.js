@@ -48,6 +48,7 @@ export const api = {
   createList: (boardId, l) => api.post(`/api/v1/boards/${boardId}/lists`, l),
   duplicateList: (id) => api.post(`/api/v1/lists/${id}/duplicate`),
   moveList: (id, direction) => api.post(`/api/v1/lists/${id}/move`, { direction }),
+  reorderLists: (boardId, order) => api.post('/api/v1/lists/reorder', { board_id: boardId, order }),
   updateList: (id, p) => api.patch(`/api/v1/lists/${id}`, p),
   deleteList: (id) => api.del(`/api/v1/lists/${id}`),
 

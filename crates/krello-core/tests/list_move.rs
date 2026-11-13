@@ -85,6 +85,34 @@ fn move_list_skips_archived_neighbors() {
 }
 
 #[test]
+fn reorder_lists_atomic() {
+    let s = test_service();
+    let (board_id, ids) = board_with_lists(&s, &["L1", "L2", "L3"]);
+
+    // Ordre cible [L3, L1, L2] : positions finales exactes, sans renormalisation
+    // intermédiaire (le per-list PATCH cassait l'ordre via le tiebreak created_at).
+    s.reorder_lists(&board_id, vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]).unwrap();
+    assert_eq!(display_order(&s, &board_id), vec!["L3", "L1", "L2"]);
+    let positions: Vec<f64> = [0, 1, 2].iter().map(|i| s.get_list(&ids[*i]).unwrap().position).collect();
+    assert_eq!(positions, vec![1.0, 2.0, 0.0]);
+
+    // Undo en UNE entrée → ordre et positions d'origine.
+    s.undo().unwrap();
+    assert_eq!(display_order(&s, &board_id), vec!["L1", "L2", "L3"]);
+    let positions: Vec<f64> = ids.iter().map(|id| s.get_list(id).unwrap().position).collect();
+    assert_eq!(positions, vec![0.0, 1.0, 2.0]);
+
+    // Ordre incomplet ou avec doublons → 400.
+    let err = s.reorder_lists(&board_id, vec![ids[0].clone()]);
+    assert!(matches!(err.unwrap_err(), krello_core::Error::Validation(_)));
+    let err = s.reorder_lists(&board_id, vec![ids[0].clone(), ids[0].clone(), ids[1].clone()]);
+    assert!(matches!(err.unwrap_err(), krello_core::Error::Validation(_)));
+    // Board inconnu → 404.
+    let err = s.reorder_lists("board_inconnu", vec![ids[0].clone()]);
+    assert!(matches!(err.unwrap_err(), krello_core::Error::NotFound(_)));
+}
+
+#[test]
 fn move_list_unknown_is_not_found() {
     let s = test_service();
     let err = s.move_list("list_inexistante", 1);

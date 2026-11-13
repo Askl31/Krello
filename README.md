@@ -154,7 +154,13 @@ garde Host, sauvegardes, **stats globales**) : `cargo test --workspace`.
 - **Déplacement des listes** : drag & drop Kanban (existant) complété par le menu
   liste « Déplacer à gauche / à droite » → `POST /lists/{id}/move {direction:-1|1}`
   (swap du voisin actif immédiat, bords = no-op, archivées exclues, undoable).
-- Schéma v13 ; 149 tests workspace verts.
+  **FIX persistance du drag** : les PATCH individuels déclenchaient une
+  renormalisation par `created_at` qui restaurait l'ordre initial → nouveau
+  `POST /lists/reorder` **atomique** (positions finales en une transaction, une
+  entrée d'undo) utilisé par le DnD ; indicateur de drop en `box-shadow` inset
+  (`drop-before`/`drop-after`) — la drop-line insérée dans le flux flex décalait
+  les colonnes pendant le drag et faisait rater le point de chute.
+- Schéma v13 ; 150 tests workspace verts.
 
 ### v0.2.0 — P0+P1 : favoris, rappels multiples, recherche commentaires, modèles de board, sous-cartes, vue d'ensemble
 

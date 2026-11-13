@@ -61,6 +61,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/lists/{id}/count", get(list_card_count))
         .route("/lists/{id}/duplicate", post(duplicate_list_route))
         .route("/lists/{id}/move", post(move_list_route))
+        .route("/lists/reorder", post(reorder_lists_route))
         // cards
         .route("/cards/{id}", get(get_card).patch(update_card).delete(delete_card))
         .route("/cards/{id}/move", post(move_card))
@@ -1101,6 +1102,22 @@ async fn move_list_route(
     let service = state.service.clone();
     let list = blocking(move || service.move_list(&id, b.direction)).await?;
     Ok(Json(list).into_response())
+}
+
+#[derive(Deserialize)]
+struct ReorderListsBody {
+    board_id: String,
+    order: Vec<String>,
+}
+
+async fn reorder_lists_route(
+    State(state): State<SharedState>,
+    Json(b): Json<ReorderListsBody>,
+) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let board_id = b.board_id.clone();
+    blocking(move || service.reorder_lists(&board_id, b.order)).await?;
+    Ok(ok_json(json!({ "ok": true })))
 }
 
 /// Native directory picker (Finder / Explorer). Only available when the server
