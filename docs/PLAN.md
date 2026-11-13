@@ -11,10 +11,10 @@
 
 | Domaine | Fonctions |
 |---|---|
-| Boards | titre, description, fond (couleur), archivage, **suppression définitive** (sidebar + paramètres, undoable) et **tout supprimer** (zone de danger, `DELETE /boards`), duplication profonde (labels/listes/cartes/checklists/champs/dépendances/automations), activité récente, export JSON/MD/CSV/ICS, import Krello + **import export Trello** |
+| Boards | titre, description, fond (couleur), archivage, **suppression définitive** (sidebar + paramètres, undoable) et **tout supprimer** (zone de danger, `DELETE /boards`), duplication profonde (labels/listes/cartes/checklists/champs/dépendances/automations), activité récente, export JSON/MD/CSV/ICS, import Krello + **import export Trello**, **favoris épinglés** (`pinned`, tri sidebar), **modèles de board** (`is_board_template`, galerie « Nouveau board », instanciation = copie profonde, exclus de la liste des tableaux) |
 | Listes | titre, position flottante, **limite WIP** (alerte UI), archivage |
-| Cartes | titre, description Markdown, position, couverture (couleur/pièce jointe), **labels**, dates début + échéance (avec heure, « terminée », complétée à), priorité (5 niveaux), **checklists** (progression %), **champs personnalisés** (texte/nombre/date/case/select), **pièces jointes** fichiers locaux (64 Mo max, vignette cover), commentaires, duplication, archivage, déplacement intra/inter-listes **et inter-boards**, filtres (texte/label/priorité/échéance/retard), recherche plein-texte **FTS5**, **modèles de cartes** (`is_template`, badge, galerie par liste, instanciation copie profonde `keepFromSource` — dates/statut/commentaires jamais copiés, exclus de recherche/compteurs/vues de travail) |
-| Vues | **Kanban** (DnD pointer events, ghost, insertion par position), **Calendrier** (mois, drag pour replanifier l'échéance), **Timeline/Gantt** (barres CPM, jalons ◆, ligne aujourd'hui, zoom jour/semaine/mois, drag pour décaler, **flèches de dépendances**, chemin critique en rouge, marge affichée), **Table** (tri sur toutes les colonnes, WBS, édition inline durée/charge/%), **Dashboard** (stats, répartitions, retards, jalons à venir, baselines + dérive, résumé IA) |
+| Cartes | titre, description Markdown, position, couverture (couleur/pièce jointe), **labels**, dates début + échéance (avec heure, « terminée », complétée à), priorité (5 niveaux), **checklists** (progression %), **champs personnalisés** (texte/nombre/date/case/select), **pièces jointes** fichiers locaux (64 Mo max, vignette cover), commentaires, duplication, archivage, déplacement intra/inter-listes **et inter-boards**, filtres (texte/label/priorité/échéance/retard), recherche plein-texte **FTS5** (+ **corps des commentaires** via `comments_fts` ; recherche globale incluant archivées), **modèles de cartes** (`is_template`, badge, galerie par liste, instanciation copie profonde `keepFromSource` — dates/statut/commentaires jamais copiés, exclus de recherche/compteurs/vues de travail), **sous-cartes hiérarchiques** (`parent_id`, même liste que le parent, WBS `1.1`, Kanban indenté, duplication récursive, détachement si le parent est archivé/supprimé, cycle → 400), **rappels multiples** (relatifs `15m→1w` avant échéance ou date fixe absolue, dédupliqués par `<idx>|<due>`, réarmés quand due/rappels changent) |
+| Vues | **Kanban** (DnD pointer events, ghost, insertion par position, sous-cartes indentées sous leur parent), **Calendrier** (mois, drag pour replanifier l'échéance), **Timeline/Gantt** (barres CPM, jalons ◆, ligne aujourd'hui, zoom jour/semaine/mois, drag pour décaler, **flèches de dépendances**, chemin critique en rouge, marge affichée), **Table** (tri sur toutes les colonnes — WBS en tri naturel `1.2 < 1.10` — WBS, édition inline durée/charge/%), **Dashboard** (stats, répartitions, retards, jalons à venir, baselines + dérive, résumé IA), **Vue d'ensemble** (accueil : stats cross-board — retards, à venir 7 j, terminées 7 j —, rollup par tableau, activité récente) |
 | Automatisations | moteur « bot » local façon Butler (voir `docs/AUTOMATIONS.md`) : 13 déclencheurs (événementiels + `card_due_soon`/`card_due` + `button` + `scheduled_daily/weekly/monthly`, sweep chaque minute) ; conditions JSON riches ; 15 actions **dont cross-board** `copy`/`create_card`/`move` vers n'importe quel board, labels recréés par nom, templates `{{card.title}}`… ; cascade inter-board bornée (profondeur 4) ; journal d'exécution `automation_runs` + endpoints `/runs` + UI constructeur dans les paramètres |
 | UX | palette **⌘K** (boards, cartes, actions), **undo/redo ⌘Z/⇧⌘Z** (stack 100 opérations, redo), thèmes clair/sombre, toasts, WebSocket temps réel (maj incrémentale), raccourcis clavier |
 
@@ -77,25 +77,31 @@ directement dans la SQLite. Windows inchangé (plugin/config/capability macOS on
 
 ## 3. Modèle de données (SQLite, migration `001_init.sql`)
 
-`boards` · `lists` · `cards` (start, due, reminder, recurrence, priority, is_milestone,
-duration_days, work_hours, pct_complete, task_type, units, hours_per_day,
-constraint_type/date, wbs, cost, cover) · `labels` · `card_labels` · `checklists` ·
+`boards` (pinned/pinned_at, is_board_template/template_description) · `lists` ·
+`cards` (start, due, reminders/reminders_sent JSON, parent_id, recurrence, priority,
+is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day,
+constraint_type/date, wbs, cost, cover, time_spent_minutes/tracking_started_at) ·
+`labels` · `card_labels` · `checklists` ·
 `checklist_items` · `custom_field_defs` · `custom_field_values` · `attachments` ·
 `comments` · `activity` · `dependencies` (type, lag_days, UNIQUE) · `schedule_cache`
 (es/ef/ls/lf/float/critical) · `baselines` · `baseline_snapshots` · `calendars` ·
-`automations` · `automation_runs` (journal d'exécution du bot) · `board_views` · `cards_fts` (FTS5 + triggers) · `meta`.
+`automations` · `automation_runs` (journal d'exécution du bot) · `board_views` · `cards_fts` (FTS5 + triggers) · `comments_fts` (FTS5 external-content + triggers) · `meta`.
 
 Positions **REAL** (insertion par moyenne, renormalisation `0..n` sur collision) ;
-index sur `(board_id, archived)`, `(list_id, archived, position)`, `due` ; WAL ;
+index sur `(board_id, archived)`, `(list_id, archived, position)`, `due`, `parent_id`,
+partiel reminder-sweep sur `due` ; WAL ;
 foreign keys ON ; busy_timeout 5 s ; cache 8 Mo.
 
 ## 4. API (extrait, complet dans `docs/API.md`)
 
-`/api/v1/health` · `/boards` CRUD + `/duplicate` `/activity` `/cards` `/lists`
+`/api/v1/health` · `/boards` CRUD + `/duplicate` `/template` `/board-templates`
+(+`/instantiate`) `/activity` `/cards` `/lists`
 `/labels` `/fields` `/dependencies` `/schedule` (GET/POST) `/baselines`
-`/automations` `/export?format=json|md|csv|ics` `/views` · `/lists/{id}` ·
-`/cards/{id}` + `/move` `/duplicate` `/labels` `/cover` `/fields/{fid}`
-`/checklists` `/comments` `/attachments` · `/search` · `/import/trello`
+`/automations` `/export?format=json|md|csv|ics` `/views` `/stats/global` ·
+`/lists/{id}` ·
+`/cards/{id}` + `/move` (+`parent_id`) `/duplicate` `/labels` `/cover` `/fields/{fid}`
+`/checklists` `/comments` `/attachments` · `/search` (+`include_comments`)
+`/import/trello`
 `/import/krello` · `/undo` `/redo` · `/ai/*` (status, parse-task, plan,
 summarize, priorities, rewrite, checklist) · `/ws` (events JSON).
 

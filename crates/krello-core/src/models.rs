@@ -21,6 +21,19 @@ pub struct Board {
     /// Free-form JSON settings (default view, wip enforcement, templates...)
     pub settings: String,
     pub archived: bool,
+    /// Pinned (favorite) board: shown first in the sidebar.
+    #[serde(default)]
+    pub pinned: bool,
+    /// When the board was pinned (ordering among pinned boards, newest first).
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+    /// Template flag: template boards are hidden from the boards list / sidebar
+    /// and feed the "Nouveau board" gallery (deep-copy sources).
+    #[serde(default)]
+    pub is_board_template: bool,
+    /// Optional helper text shown in the template gallery.
+    #[serde(default)]
+    pub template_description: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -62,11 +75,17 @@ pub struct Card {
     pub due: Option<String>,
     #[serde(default)]
     pub due_complete: bool,
-    /// "15m"|"1h"|"1d"|"2d" or ISO datetime
-    pub reminder: Option<String>,
-    /// When the reminder was last fired (NULL = armed). Reset when due/reminder changes.
+    /// Multiple reminders ("[]" = none). JSON in `cards.reminders`.
     #[serde(default)]
-    pub reminder_sent_at: Option<String>,
+    pub reminders: Vec<Reminder>,
+    /// Fired marks keyed "<idx>|<due>" (Null = all armed).
+    /// Reset whenever due/reminders change.
+    #[serde(default)]
+    pub reminders_sent: serde_json::Value,
+    /// Parent sub-card link: `Some(id)` = child of that card (SAME list).
+    /// Deleting/archiving the parent detaches children (NULL).
+    #[serde(default)]
+    pub parent_id: Option<String>,
     /// JSON recurrence {"freq":"daily|weekly|monthly","interval":n,"until":"date"}
     pub recurrence: Option<String>,
     #[serde(default)]
@@ -102,6 +121,22 @@ pub struct Card {
     #[serde(default)]
     pub tracking_started_at: Option<String>,
 }
+
+/// One reminder: relative to the due date (`offset` from `REMINDER_OFFSETS`)
+/// or absolute (`at` = ISO datetime). JSON-serialized in `cards.reminders`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reminder {
+    /// "relative" | "absolute"
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+/// Allowed offsets for relative reminders (before the due date).
+pub const REMINDER_OFFSETS: [&str; 7] = ["15m", "30m", "1h", "2h", "1d", "2d", "1w"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Label {
@@ -301,6 +336,7 @@ pub struct UpdateBoard {
     pub deadline: Option<String>,
     pub settings: Option<String>,
     pub archived: Option<bool>,
+    pub pinned: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -331,7 +367,9 @@ pub struct CreateCard {
     pub start: Option<String>,
     pub due: Option<String>,
     pub due_complete: Option<bool>,
-    pub reminder: Option<String>,
+    pub reminders: Option<Vec<Reminder>>,
+    /// Sub-card parentage: must be a card of the SAME list.
+    pub parent_id: Option<String>,
     pub recurrence: Option<String>,
     pub priority: Option<String>,
     pub is_milestone: Option<bool>,
@@ -359,7 +397,7 @@ pub struct UpdateCard {
     pub start: Option<String>,
     pub due: Option<String>,
     pub due_complete: Option<bool>,
-    pub reminder: Option<String>,
+    pub reminders: Option<Vec<Reminder>>,
     pub recurrence: Option<String>,
     pub priority: Option<String>,
     pub is_milestone: Option<bool>,
@@ -409,6 +447,21 @@ pub struct SetTemplate {
     pub template_description: Option<String>,
 }
 
+/// Toggle the template flag on a board ("Enregistrer comme modèle").
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct SetBoardTemplate {
+    pub is_template: bool,
+    pub template_description: Option<String>,
+}
+
+/// Instantiate a new board from a saved board template (deep copy).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct InstantiateBoardTemplate {
+    pub title: Option<String>,
+}
+
 /// Instantiate a new card from a template: deep copy in one transaction.
 /// Title and description are always copied; dates, completion status,
 /// comments and activity never are.
@@ -430,10 +483,14 @@ pub struct InstantiateTemplate {
 /// - `position` provided → insert at that floating position.
 /// - `before`/`after` card id → insert before/after that card.
 /// - neither → append to end of target list.
+/// - `parent_id`: `""` → become top-level; some id → become a sub-card of
+///   that card (same list required); absent → unchanged (same list) or
+///   detached when moving to another list.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct MoveCard {
     pub list_id: Option<String>,
+    pub parent_id: Option<String>,
     pub position: Option<f64>,
     pub before: Option<String>,
     pub after: Option<String>,

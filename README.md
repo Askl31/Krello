@@ -11,12 +11,23 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
 
 - **Kanban** : drag & drop fluide, listes, WIP limits, labels, couvertures,
   checklists avec progression, champs personnalisés, pièces jointes, commentaires,
-  dates + priorités + filtres, recherche plein-texte, archivage, duplication,
+  dates + priorités + filtres, recherche plein-texte (titres/descriptions **et
+  commentaires**), recherche globale incluant les archivées, archivage, duplication,
   import/export (JSON/MD/CSV/ICS) et **import d'exports Trello**.
+  **Sous-cartes hiérarchiques** : `parent_id` (même liste), Kanban indenté sous le
+  parent avec badge « x/y sous-cartes », WBS `1.1`, duplication récursive,
+  détachement si le parent est archivé/supprimé, cycle interdit.
+  **Rappels multiples** : relatifs (`15m` → `1w` avant l'échéance) ou date fixe
+  absolue, éditeur dans la modale, dédupliqués et réarmés au changement d'échéance.
   **Suivi du temps** : ▶/⏸ sur une carte banque les minutes travaillées
   (incrément cumulé, session en cours affichée live) — migration 005.
   **Historique par carte** : section « Activité » dans la modale (flux filtré
   `card_id`, libellés FR, détail du payload).
+- **Boards** : **favoris épinglés** (📌, tri en tête de la sidebar), **modèles de
+  board** (« Enregistrer comme modèle » → galerie « Nouveau board » → instanciation
+  copie profonde en une opération undoable).
+- **Vue d'ensemble** (accueil) : stats cross-board — tableaux, cartes actives,
+  retards, à venir 7 j, terminées 7 j — rollup par tableau et activité récente.
 - **Gantt / Timeline (MS Project)** : durées en jours ouvrés, charge, % accompli,
   jalons, dépendances **FS/SS/FF/SF + lag**, **chemin critique** (CPM complet :
   marges, ES/EF/LS/LF), calendriers avec jours fériés, baselines et dérives, WBS,
@@ -125,11 +136,52 @@ calendrier replanifie.
 
 ## Tests
 
-110 tests (smoke, cartes/déplacements/undo, CPM+calendriers+baselines, recherche,
-import/export/automations, IA, intégration HTTP, rappels, récurrence, tracking,
-duplication de listes, garde Host, sauvegardes) : `cargo test --workspace`.
+144 tests (smoke + migrations, cartes/déplacements/**sous-cartes**/undo, CPM+calendriers+baselines, recherche
+(**commentaires**), import/export/automations, IA, intégration HTTP, **rappels multiples**,
+récurrence, tracking, duplication (listes + **arbres de sous-cartes** + **modèles de board**),
+garde Host, sauvegardes, **stats globales**) : `cargo test --workspace`.
 
 ## Journal des modifications
+### v0.2.0 — P0+P1 : favoris, rappels multiples, recherche commentaires, modèles de board, sous-cartes, vue d'ensemble
+
+- **Favoris** : épingler un board (📌 dans la sidebar, `PATCH /boards/{id} {pinned}`) —
+  les épinglés passent en tête (dernier épinglé d'abord), undo inclus. Migration 008.
+- **Rappels multiples** (migration 009) : `cards.reminders` JSON — relatifs
+  (`15m/30m/1h/2h/1d/2d/1w` avant l'échéance) **ou** date fixe absolue ; éditeur
+  complet dans la modale carte ; sweep minute dédupliqué par `<idx>|<due>`
+  (`reminders_sent`), réarmé quand `due`/`reminders` changent ; l'ancien champ
+  `reminder` est porté automatiquement ; index partiel du sweep recréé.
+- **Recherche dans les commentaires** (migration 010) : `comments_fts` (FTS5
+  external-content + triggers + rebuild) ; `/search` inclut les commentaires par
+  défaut (`include_comments=0` pour l'ancien comportement) ; la recherche globale
+  inclut désormais les cartes archivées.
+- **Modèles de board** (migration 011) : « Enregistrer comme modèle » dans les
+  réglages du tableau ; galerie au clic « Nouveau board » ; instanciation =
+  copie profonde (listes, cartes + sous-cartes, labels, champs, dépendances,
+  règles) jamais modèle elle-même ; exclus des listes de boards. Endpoints :
+  `PATCH /boards/{id}/template`, `GET /board-templates`,
+  `POST /board-templates/{id}/instantiate`.
+- **Sous-cartes hiérarchiques** (migration 012) : `cards.parent_id` (même liste
+  que le parent, cycle → 400, anchor `before`/`after` au même niveau) ; Kanban
+  indenté sous le parent + badge « x/y sous-cartes » ; WBS hiérarchique
+  (`1.1.1`) et tri naturel dans la vue Table (`1.2 < 1.10`) ; duplication de
+  carte/bord **récursive** avec remap d'ids (export/import JSON inclus) ;
+  archivage/suppression du parent détache les enfants ; « Carte parente » dans
+  la modale.
+- **Vue d'ensemble** (accueil) : `GET /stats/global` — tableaux, cartes actives,
+  retards, à venir 7 j, terminées 7 j, rollup par tableau, 20 dernières activités.
+  **Listes actionnables** : « 🔥 Urgentes » (priorités urgent/high actives, badge
+  priorité) et « ⏰ Échéances proches » (aujourd'hui → +2 j, libellés
+  Aujourd'hui/Demain/…) — clic sur une carte = modale (deep link `#/b/{board}/board/c/{card}`),
+  « + N autres… » au-delà de 12.
+  **Accès permanent** : item « Vue d'ensemble » en tête de la sidebar (état actif
+  suivi) et première entrée de la palette ⌘K — plus besoin de relancer l'app.
+  **FIX deep link carte** : `import('../components/card_modal.js')` → `./components/…`
+  (404 depuis toujours — le lien profond `#/b/{board}/{view}/c/{card}` n'ouvrait
+  jamais la modale).
+- Schéma : v12 (`SCHEMA_VERSION`), migrations 008→012 idempotentes ; legacy
+  `reminder`/`reminder_sent_at` portés puis inertes.
+
 ### v0.1.7 — Spotlight Quick Add (macOS) : ajout rapide de tâches sans quitter l'application active
 
 - **Utilitaire natif Spotlight (`Ajouter à Krello.app`)** : Paramètres → onglet « macOS » →

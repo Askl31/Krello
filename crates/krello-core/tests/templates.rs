@@ -127,7 +127,7 @@ fn instantiate_deep_copy_with_healthy_defaults() {
     assert!(card.due.is_none());
     assert!(!card.due_complete);
     assert!(card.completed_at.is_none());
-    assert!(card.reminder.is_none());
+    assert!(card.reminders.is_empty(), "les rappels ne sont jamais copiés");
     assert_eq!(card.pct_complete, 0);
     let detail = s.card_detail(&card.id).unwrap();
     assert!(detail["comments"].as_array().unwrap().is_empty());

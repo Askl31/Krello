@@ -37,6 +37,10 @@ export const api = {
   deleteBoard: (id) => api.del(`/api/v1/boards/${id}`),
   deleteAllBoards: () => api.del('/api/v1/boards'),
   duplicateBoard: (id) => api.post(`/api/v1/boards/${id}/duplicate`),
+  setBoardTemplate: (id, p) => api.patch(`/api/v1/boards/${id}/template`, p),
+  boardTemplatesGallery: () => api.get('/api/v1/board-templates'),
+  instantiateBoardTemplate: (id, p) => api.post(`/api/v1/board-templates/${id}/instantiate`, p),
+  globalStats: () => api.get('/api/v1/stats/global'),
   boardActivity: (id, limit = 60, cardId) =>
     api.get(`/api/v1/boards/${id}/activity?limit=${limit}${cardId ? `&card_id=${cardId}` : ''}`),
 

@@ -109,6 +109,41 @@ impl Db {
                 [],
             )?;
         }
+        if version < 8 {
+            self.conn.execute_batch(include_str!("../migrations/008_pinned.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '8')",
+                [],
+            )?;
+        }
+        if version < 9 {
+            self.conn.execute_batch(include_str!("../migrations/009_reminders.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '9')",
+                [],
+            )?;
+        }
+        if version < 10 {
+            self.conn.execute_batch(include_str!("../migrations/010_comments_fts.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '10')",
+                [],
+            )?;
+        }
+        if version < 11 {
+            self.conn.execute_batch(include_str!("../migrations/011_board_templates.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '11')",
+                [],
+            )?;
+        }
+        if version < 12 {
+            self.conn.execute_batch(include_str!("../migrations/012_subcards.sql"))?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '12')",
+                [],
+            )?;
+        }
 
         // Ensure the default calendar exists.
         self.conn.execute(

@@ -17,12 +17,12 @@ fn migration_is_idempotent_and_creates_schema() {
             ('boards','lists','cards','labels','card_labels','checklists','checklist_items',
               'custom_field_defs','custom_field_values','attachments','comments','activity',
               'dependencies','schedule_cache','baselines','baseline_snapshots','calendars',
-              'automations','automation_runs','board_views','cards_fts')",
+              'automations','automation_runs','board_views','cards_fts','comments_fts')",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(n, 21, "expected all 21 schema objects");
+    assert_eq!(n, 22, "expected all 22 schema objects");
 
     let version: i64 = db
         .conn

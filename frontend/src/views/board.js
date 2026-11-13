@@ -273,6 +273,32 @@ function listEl(list) {
   const cards = cardsOfList(list.id);
   const over = list.wip_limit && cards.length > list.wip_limit;
 
+  // Ordre arbre : parents d'abord, sous-cartes indentées sous leur parent.
+  const ids = new Set(cards.map((c) => c.id));
+  const kidsOf = new Map();
+  const tops = [];
+  for (const c of cards) {
+    if (c.parent_id && ids.has(c.parent_id)) {
+      if (!kidsOf.has(c.parent_id)) kidsOf.set(c.parent_id, []);
+      kidsOf.get(c.parent_id).push(c);
+    } else {
+      tops.push(c);
+    }
+  }
+  const rows = [];
+  const pushTree = (group, depth) => {
+    for (const c of group) {
+      const kids = kidsOf.get(c.id);
+      rows.push({
+        c,
+        depth,
+        subLabel: kids ? `${kids.filter((k) => k.due_complete).length}/${kids.length} sous-cartes` : null,
+      });
+      if (kids) pushTree(kids, depth + 1);
+    }
+  };
+  pushTree(tops, 0);
+
   el.innerHTML = `
     <div class="list-head">
       <span class="list-status-dot"></span>
@@ -285,7 +311,7 @@ function listEl(list) {
       </button>
     </div>
     <div class="list-body" data-body="${list.id}">
-      ${cards.map((c) => cardTileHtml(c, { selected: selection.has(c.id) })).join('')}
+      ${rows.map(({ c, depth, subLabel }) => cardTileHtml(c, { selected: selection.has(c.id), depth, subLabel })).join('')}
     </div>
     <div class="list-foot">
       <button class="add-card" data-add-card="${list.id}">
@@ -386,10 +412,29 @@ function cardDragOpts(card) {
       const targetListId = listEl?.dataset.list;
       if (!targetListId) return;
       // position : carte avant laquelle insérer (position du pointeur)
-      const tiles = [...listEl.querySelectorAll('.card-tile')].filter((x) => x.dataset.card !== card.id);
-      const beforeId = tiles.find((x) => x.getBoundingClientRect().bottom > lastPointerY())?.dataset.card || null;
+      const byId = new Map(state.cards.map((c) => [c.id, c]));
+      const isDesc = (c) => {
+        let p = c.parent_id;
+        while (p) {
+          if (p === card.id) return true;
+          p = byId.get(p)?.parent_id || null;
+        }
+        return false;
+      };
+      const tiles = [...listEl.querySelectorAll('.card-tile')]
+        .filter((x) => x.dataset.card !== card.id)
+        .filter((x) => {
+          const cx = byId.get(x.dataset.card);
+          return cx && !isDesc(cx);
+        });
+      const beforeTile = tiles.find((x) => x.getBoundingClientRect().bottom > lastPointerY());
+      const beforeId = beforeTile?.dataset.card || null;
+      // Niveau d'imbrication : celui de la carte de référence (même niveau),
+      // top-level en fin de liste. Changer de parent passe par la modale.
+      const beforeCard = beforeId ? byId.get(beforeId) : null;
+      const parentId = beforeCard ? (beforeCard.parent_id || '') : '';
       try {
-        await window.__krelloMoveCard(card.id, { list_id: targetListId, before: beforeId || undefined });
+        await window.__krelloMoveCard(card.id, { list_id: targetListId, before: beforeId || undefined, parent_id: parentId });
         reload();
       } catch (e) {
         toast(e.message, 'err');

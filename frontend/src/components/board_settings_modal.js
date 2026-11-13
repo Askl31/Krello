@@ -880,6 +880,18 @@ export async function openBoardSettingsModal(boardId, defaultTab = 'planning') {
           </div>
         </div>
 
+        <div class="board-settings-card">
+          <div class="board-settings-card-head">
+            <div>
+              <h4 class="board-settings-card-title">${icon('kanban', { size: 16 })} <span>Modèle de board</span></h4>
+              <p class="board-settings-card-desc">${board.is_board_template
+                ? `Ce tableau est un modèle : il alimente la galerie « Nouveau board » et n'apparaît pas dans la liste des tableaux${board.template_description ? ` — ${escapeHtml(board.template_description)}` : ''}.`
+                : 'Enregistrer ce tableau comme modèle réutilisable : listes, cartes, labels, champs et règles seront copiés à chaque instanciation.'}</p>
+            </div>
+            <button class="btn sm ${board.is_board_template ? 'ghost' : 'primary'}" id="bm-template">${board.is_board_template ? 'Reconvertir en tableau' : 'Enregistrer comme modèle'}</button>
+          </div>
+        </div>
+
         <div class="board-settings-card settings-danger-card">
           <div class="board-settings-card-head">
             <div>
@@ -908,6 +920,21 @@ export async function openBoardSettingsModal(boardId, defaultTab = 'planning') {
         } catch (e) {
           toast(e.message, 'err');
         }
+      });
+
+      contentHost.querySelector('#bm-template')?.addEventListener('click', async () => {
+        try {
+          let desc = board.template_description || null;
+          if (!board.is_board_template) {
+            const asked = await promptDialog('Description du modèle (optionnelle)', desc || '', 'Ex. : Process de lancement produit');
+            if (asked === null) return;
+            desc = asked.trim() || null;
+          }
+          const updated = await api.setBoardTemplate(board.id, { is_template: !board.is_board_template, template_description: desc });
+          await loadBoards();
+          close();
+          toast(updated.is_board_template ? 'Board enregistré comme modèle' : 'Board reconverti en tableau', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
       });
 
       contentHost.querySelector('#bm-delete')?.addEventListener('click', async () => {

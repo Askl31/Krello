@@ -198,13 +198,49 @@ pub fn recompute(conn: &Connection, board_id: &str) -> Result<ScheduleSummary> {
             .partial_cmp(&(lb, b.position))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    // WBS hiérarchique: 1, 1.1, 1.2, 1.2.1… par liste. L'ordre suit la
+    // position; une sous-carte dont le parent n'existe pas dans ce board
+    // (ou vit dans une autre liste) est comptée comme top-level.
     {
-        let mut stmt = conn.prepare_cached("UPDATE cards SET wbs=?2 WHERE id=?1")?;
-        for (i, c) in cards.iter().enumerate() {
-            let wbs = (i + 1).to_string();
-            if c.wbs != wbs {
-                stmt.execute(params![c.id, wbs])?;
+        let lookup: HashMap<&str, &Card> =
+            cards.iter().map(|c| (c.id.as_str(), c)).collect();
+        let mut children_of: HashMap<&str, Vec<&Card>> = HashMap::new();
+        let mut tops: Vec<&Card> = Vec::new();
+        for c in &cards {
+            let valid_parent = c
+                .parent_id
+                .as_deref()
+                .and_then(|pid| lookup.get(pid))
+                .is_some_and(|p| p.list_id == c.list_id);
+            if valid_parent {
+                children_of
+                    .entry(c.parent_id.as_deref().expect("validé ci-dessus"))
+                    .or_default()
+                    .push(c);
+            } else {
+                tops.push(c);
             }
+        }
+        fn walk<'a>(
+            group: &[&'a Card],
+            prefix: &str,
+            children_of: &HashMap<&str, Vec<&'a Card>>,
+            updates: &mut Vec<(String, String)>,
+        ) {
+            for (i, c) in group.iter().enumerate() {
+                let wbs =
+                    if prefix.is_empty() { (i + 1).to_string() } else { format!("{prefix}.{}", i + 1) };
+                updates.push((c.id.clone(), wbs.clone()));
+                if let Some(kids) = children_of.get(c.id.as_str()) {
+                    walk(kids, &wbs, children_of, updates);
+                }
+            }
+        }
+        let mut updates: Vec<(String, String)> = Vec::new();
+        walk(&tops, "", &children_of, &mut updates);
+        let mut stmt = conn.prepare_cached("UPDATE cards SET wbs=?2 WHERE id=?1")?;
+        for (cid, wbs) in &updates {
+            stmt.execute(params![cid, wbs])?;
         }
     }
 

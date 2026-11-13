@@ -555,6 +555,29 @@ pub fn import_krello(service: &crate::service::Service, json: &str) -> Result<Bo
                 }
             }
         }
+        // Remap des liens parent/enfant (les ids de cartes ont été régénérés).
+        {
+            let mut stmt = db.prepare_cached(
+                "SELECT id, parent_id FROM cards WHERE board_id=?1 AND parent_id IS NOT NULL",
+            )?;
+            let pairs: Vec<(String, String)> = stmt
+                .query_map([new_board.id.clone()], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for (cid, old_parent) in pairs {
+                match card_map.get(&old_parent) {
+                    Some(new_parent) => {
+                        db.execute(
+                            "UPDATE cards SET parent_id=?2 WHERE id=?1",
+                            params![cid, new_parent],
+                        )?;
+                    }
+                    None => {
+                        db.execute("UPDATE cards SET parent_id=NULL WHERE id=?1", params![cid])?;
+                    }
+                }
+            }
+        }
         if let Some(deps) = doc.get("dependencies").and_then(|v| v.as_array()) {
             for dv in deps {
                 let d: Dependency = serde_json::from_value(dv.clone())
@@ -819,8 +842,9 @@ pub fn import_trello(service: &crate::service::Service, json: &str) -> Result<Bo
                     start,
                     due,
                     due_complete,
-                    reminder: None,
-                    reminder_sent_at: None,
+                    reminders: Vec::new(),
+                    reminders_sent: serde_json::Value::Null,
+                    parent_id: None,
                     time_spent_minutes: 0,
                     tracking_started_at: None,
                     recurrence: None,
@@ -980,6 +1004,10 @@ fn create_board_shell(
         deadline,
         settings: "{}".into(),
         archived: false,
+        pinned: false,
+        pinned_at: None,
+        is_board_template: false,
+        template_description: None,
         created_at: now.clone(),
         updated_at: now,
     };

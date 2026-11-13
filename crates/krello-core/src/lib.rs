@@ -17,4 +17,4 @@ pub mod undo;
 
 pub use error::{Error, Result};
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 12;

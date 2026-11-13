@@ -19,6 +19,11 @@ impl Service {
         if c.title.trim().is_empty() {
             return Err(Error::Validation("le titre de la carte est requis".into()));
         }
+        let reminders = {
+            let r = c.reminders.clone().unwrap_or_default();
+            validate_reminders(&r)?;
+            r
+        };
         let mut card = Card {
             id: new_id("card"),
             board_id: board_id.to_string(),
@@ -33,8 +38,9 @@ impl Service {
             start: c.start,
             due: c.due,
             due_complete: c.due_complete.unwrap_or(false),
-            reminder: c.reminder,
-            reminder_sent_at: None,
+            reminders,
+            reminders_sent: serde_json::Value::Null,
+            parent_id: None,
             time_spent_minutes: 0,
             tracking_started_at: None,
             recurrence: c.recurrence,
@@ -67,6 +73,17 @@ impl Service {
                 return Err(Error::Validation(
                     "la liste n'appartient pas à ce board".into(),
                 ));
+            }
+            // Sous-carte : le parent doit exister et vivre dans la MÊME liste.
+            if let Some(pid) = c.parent_id.as_deref().filter(|p| !p.is_empty()) {
+                let parent = query_card(&db.conn, pid)?
+                    .ok_or_else(|| Error::NotFound(format!("card {pid}")))?;
+                if parent.list_id != c.list_id {
+                    return Err(Error::Validation(
+                        "une sous-carte doit être dans la liste de sa carte parente".into(),
+                    ));
+                }
+                card.parent_id = Some(pid.to_string());
             }
             card.position = match c.position {
                 Some(p) => p,
@@ -184,13 +201,14 @@ impl Service {
         }
         if u.due.is_some() {
             after.due = u.due;
-            // Nouvelle échéance → le rappel se réarme.
-            after.reminder_sent_at = None;
+            // Nouvelle échéance → les rappels se réarment.
+            after.reminders_sent = serde_json::Value::Null;
         }
-        if let Some(v) = u.reminder {
-            // Chaîne vide = supprimer le rappel (l'UI envoie "" pour « Aucun »).
-            after.reminder = if v.is_empty() { None } else { Some(v) };
-            after.reminder_sent_at = None;
+        if let Some(v) = u.reminders {
+            // Liste vide = aucun rappel.
+            validate_reminders(&v)?;
+            after.reminders = v;
+            after.reminders_sent = serde_json::Value::Null;
         }
         if u.recurrence.is_some() {
             after.recurrence = u.recurrence;
@@ -252,6 +270,12 @@ impl Service {
         after.updated_at = now_updated();
         update_card_row(&db.conn, &after)?;
 
+        // Archiver un parent détache ses sous-cartes (redeviennent top-level).
+        if after.archived && !before.archived {
+            db.conn
+                .execute("UPDATE cards SET parent_id=NULL WHERE parent_id=?1", [id])?;
+        }
+
         // Récurrence: compléter une carte récurrente crée l'occurrence suivante
         // (même liste et attributs, échéance avancée d'un cran) dans la même
         // transaction; l'undo/redo de l'ensemble reste une seule entrée.
@@ -279,7 +303,7 @@ impl Service {
                         next.due_complete = false;
                         next.completed_at = None;
                         next.pct_complete = 0;
-                        next.reminder_sent_at = None;
+                        next.reminders_sent = serde_json::Value::Null;
                         next.archived = false;
                         next.position = next_card_position(&db.conn, &after.list_id)?;
                         next.created_at = now_rfc3339();
@@ -365,6 +389,14 @@ impl Service {
         let target_list_id = m.list_id.clone().unwrap_or_else(|| before.list_id.clone());
         let mut after = before.clone();
 
+        // Niveau d'imbrication cible : Some("") = top-level, Some(id) = sous-carte
+        // de `id`, None = inchangé (même liste) ou détaché (autre liste).
+        let explicit_parent: Option<Option<String>> = match m.parent_id.as_deref() {
+            Some("") => Some(None),
+            Some(pid) => Some(Some(pid.to_string())),
+            None => None,
+        };
+
         {
             let db = self.lock_db()?;
             let target = query_list(&db.conn, &target_list_id)?
@@ -384,18 +416,50 @@ impl Service {
                 after.board_id = target.board_id.clone();
             }
 
+            // Résout et valide le parent cible (même liste, pas de cycle).
+            let resolved_parent: Option<String> = match explicit_parent {
+                Some(explicit) => match explicit {
+                    Some(pid) => {
+                        let parent = query_card(&db.conn, &pid)?
+                            .ok_or_else(|| Error::NotFound(format!("card {pid}")))?;
+                        if parent.list_id != target_list_id {
+                            return Err(Error::Validation(
+                                "une sous-carte doit être dans la liste de sa carte parente"
+                                    .into(),
+                            ));
+                        }
+                        if pid == id || is_descendant(&db.conn, id, &pid)? {
+                            return Err(Error::Validation(
+                                "impossible d'attacher une carte à elle-même ou à sa descendance"
+                                    .into(),
+                            ));
+                        }
+                        Some(pid)
+                    }
+                    None => None,
+                },
+                None => {
+                    if target_list_id == before.list_id {
+                        before.parent_id.clone()
+                    } else {
+                        None
+                    }
+                }
+            };
+            after.parent_id = resolved_parent.clone();
+
             let new_position = if let Some(p) = m.position {
                 p
             } else if let Some(before_id) = &m.before {
-                let anchor: Option<(f64, String)> = db
+                let anchor: Option<(f64, String, Option<String>)> = db
                     .conn
                     .query_row(
-                        "SELECT position, list_id FROM cards WHERE id=?1",
+                        "SELECT position, list_id, parent_id FROM cards WHERE id=?1",
                         [before_id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )
                     .optional()?;
-                let Some((anchor_pos, anchor_list)) = anchor else {
+                let Some((anchor_pos, anchor_list, anchor_parent)) = anchor else {
                     return Err(Error::NotFound(format!("card {before_id}")));
                 };
                 if anchor_list != target_list_id {
@@ -403,11 +467,16 @@ impl Service {
                         "la carte de référence n'est pas dans la liste cible".into(),
                     ));
                 }
+                if anchor_parent != resolved_parent {
+                    return Err(Error::Validation(
+                        "la carte de référence n'est pas au même niveau d'imbrication".into(),
+                    ));
+                }
                 let prev: Option<f64> = db
                     .conn
                     .query_row(
-                        "SELECT MAX(position) FROM cards WHERE list_id=?1 AND id != ?2 AND position < ?3",
-                        params![target_list_id, id, anchor_pos],
+                        "SELECT MAX(position) FROM cards WHERE list_id=?1 AND id != ?2 AND position < ?3 AND parent_id IS ?4",
+                        params![target_list_id, id, anchor_pos, resolved_parent.clone()],
                         |r| r.get(0),
                     )
                     .optional()?
@@ -417,15 +486,15 @@ impl Service {
                     None => anchor_pos - 1.0,
                 }
             } else if let Some(after_id) = &m.after {
-                let anchor: Option<(f64, String)> = db
+                let anchor: Option<(f64, String, Option<String>)> = db
                     .conn
                     .query_row(
-                        "SELECT position, list_id FROM cards WHERE id=?1",
+                        "SELECT position, list_id, parent_id FROM cards WHERE id=?1",
                         [after_id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )
                     .optional()?;
-                let Some((anchor_pos, anchor_list)) = anchor else {
+                let Some((anchor_pos, anchor_list, anchor_parent)) = anchor else {
                     return Err(Error::NotFound(format!("card {after_id}")));
                 };
                 if anchor_list != target_list_id {
@@ -433,11 +502,16 @@ impl Service {
                         "la carte de référence n'est pas dans la liste cible".into(),
                     ));
                 }
+                if anchor_parent != resolved_parent {
+                    return Err(Error::Validation(
+                        "la carte de référence n'est pas au même niveau d'imbrication".into(),
+                    ));
+                }
                 let next: Option<f64> = db
                     .conn
                     .query_row(
-                        "SELECT MIN(position) FROM cards WHERE list_id=?1 AND id != ?2 AND position > ?3",
-                        params![target_list_id, id, anchor_pos],
+                        "SELECT MIN(position) FROM cards WHERE list_id=?1 AND id != ?2 AND position > ?3 AND parent_id IS ?4",
+                        params![target_list_id, id, anchor_pos, resolved_parent.clone()],
                         |r| r.get(0),
                     )
                     .optional()?
@@ -450,8 +524,8 @@ impl Service {
                 let max: Option<f64> = db
                     .conn
                     .query_row(
-                        "SELECT MAX(position) FROM cards WHERE list_id=?1 AND id != ?2",
-                        params![target_list_id, id],
+                        "SELECT MAX(position) FROM cards WHERE list_id=?1 AND id != ?2 AND parent_id IS ?3",
+                        params![target_list_id, id, resolved_parent.clone()],
                         |r| r.get(0),
                     )
                     .optional()?
@@ -461,8 +535,8 @@ impl Service {
 
             // Collision → renormalize the list and recompute a collision-free position.
             let collision: i64 = db.conn.query_row(
-                "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND id != ?2 AND ABS(position - ?3) < ?4",
-                params![target_list_id, id, new_position, EPS],
+                "SELECT COUNT(*) FROM cards WHERE list_id=?1 AND id != ?2 AND ABS(position - ?3) < ?4 AND parent_id IS ?5",
+                params![target_list_id, id, new_position, EPS, resolved_parent.clone()],
                 |r| r.get(0),
             )?;
             if collision > 0 {
@@ -526,6 +600,7 @@ impl Service {
     }
 
     /// Deep-copy a card in the same list, right below the source.
+    /// Sub-cards are copied recursively under the new parent (same positions).
     pub fn duplicate_card(&self, id: &str) -> Result<Card> {
         let db = self.lock_db()?;
         let src =
@@ -543,74 +618,23 @@ impl Service {
             Some(n) => (n + src.position) / 2.0,
             None => src.position + 1.0,
         };
-        let mut card = src.clone();
-        card.id = new_id("card");
-        card.title = format!("{} (copie)", src.title);
-        card.position = new_position;
-        card.completed_at = None;
-        card.created_at = now_rfc3339();
-        card.updated_at = now_rfc3339();
-        insert_card_row(&db.conn, &card)?;
-
-        let lids = label_ids_for_card(&db.conn, id)?;
-        for lid in lids {
-            db.conn.execute(
-                "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
-                params![&card.id, lid],
-            )?;
-        }
-        let mut stmt = db
-            .conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
-        let cls: Vec<Checklist> = stmt
-            .query_map([id], row_checklist)?
-            .collect::<rusqlite::Result<_>>()?;
-        drop(stmt);
-        for cl in cls {
-            let ncl = Checklist {
-                id: new_id("cl"),
-                card_id: card.id.clone(),
-                ..cl.clone()
-            };
-            insert_checklist_row(&db.conn, &ncl)?;
-            let mut stmt = db.conn.prepare_cached("SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position")?;
-            let items: Vec<ChecklistItem> = stmt
-                .query_map([&cl.id], row_checklist_item)?
-                .collect::<rusqlite::Result<_>>()?;
-            drop(stmt);
-            for it in items {
-                insert_checklist_item_row(
-                    &db.conn,
-                    &ChecklistItem {
-                        id: new_id("cli"),
-                        checklist_id: ncl.id.clone(),
-                        ..it
-                    },
-                )?;
-            }
-        }
-        let mut stmt = db.conn.prepare_cached("SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1")?;
-        let fvs: Vec<CustomFieldValue> = stmt
-            .query_map([id], row_field_value)?
-            .collect::<rusqlite::Result<_>>()?;
-        drop(stmt);
-        for fv in fvs {
-            db.conn.execute(
-                "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
-                params![&card.id, fv.field_id, fv.value],
-            )?;
-        }
+        let mut created: Vec<Card> = Vec::new();
+        let card =
+            copy_card_tree(&db.conn, &src, None, new_position, Some(" (copie)"), &mut created)?;
         log_activity(
             &db.conn,
             &card.board_id,
             Some(&card.id),
             "card_duplicated",
-            &serde_json::json!({ "source": id }),
+            &serde_json::json!({ "source": id, "subcards": created.len() - 1 }),
         )?;
         drop(db);
 
+        let actions: Vec<UndoAction> =
+            created.into_iter().map(UndoAction::CardCreated).collect();
         self.push_undo(UndoEntry {
             label: format!("Duplication de la carte « {} »", src.title),
-            actions: vec![UndoAction::CardCreated(card.clone())],
+            actions,
         });
         self.emit(Event::CardCreated {
             board_id: card.board_id.clone(),
@@ -728,8 +752,8 @@ impl Service {
         card.due = None;
         card.due_complete = false;
         card.completed_at = None;
-        card.reminder = None;
-        card.reminder_sent_at = None;
+        card.reminders = Vec::new();
+        card.reminders_sent = serde_json::Value::Null;
         card.recurrence = None;
         card.constraint_type = "asap".into();
         card.constraint_date = None;
@@ -1095,6 +1119,145 @@ impl Service {
         }
         Ok(serde_json::Value::Object(map))
     }
+}
+
+/// True if `candidate` is `id` itself or one of its descendants (walks up the
+/// parent chain from `candidate`). Bounded depth guards against corrupt data.
+fn is_descendant(conn: &rusqlite::Connection, id: &str, candidate: &str) -> Result<bool> {
+    let mut current = candidate.to_string();
+    for _ in 0..64 {
+        if current == id {
+            return Ok(true);
+        }
+        let next: Option<Option<String>> = conn
+            .query_row("SELECT parent_id FROM cards WHERE id=?1", [&current], |r| r.get(0))
+            .optional()?;
+        match next.flatten() {
+            Some(p) => current = p,
+            None => return Ok(false),
+        }
+    }
+    Ok(false)
+}
+
+/// Deep-copy `src` (+ its sub-card tree) into the same list. `parent_id`
+/// overrides the copy's parent; `title_suffix` renames only the top copy.
+/// Labels, checklists, items and custom field values travel along. Every
+/// created card (top + descendants) is appended to `created` for undo.
+fn copy_card_tree(
+    conn: &rusqlite::Connection,
+    src: &Card,
+    parent_id: Option<String>,
+    position: f64,
+    title_suffix: Option<&str>,
+    created: &mut Vec<Card>,
+) -> Result<Card> {
+    let mut card = src.clone();
+    card.id = new_id("card");
+    card.parent_id = parent_id;
+    card.position = position;
+    if let Some(sfx) = title_suffix {
+        card.title = format!("{}{sfx}", src.title);
+    }
+    card.completed_at = None;
+    card.created_at = now_rfc3339();
+    card.updated_at = now_rfc3339();
+    insert_card_row(conn, &card)?;
+
+    let lids = label_ids_for_card(conn, &src.id)?;
+    for lid in lids {
+        conn.execute(
+            "INSERT OR IGNORE INTO card_labels(card_id,label_id) VALUES(?1,?2)",
+            params![&card.id, lid],
+        )?;
+    }
+    let mut stmt =
+        conn.prepare_cached("SELECT * FROM checklists WHERE card_id=?1 ORDER BY position")?;
+    let cls: Vec<Checklist> = stmt
+        .query_map([&src.id], row_checklist)?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for cl in cls {
+        let ncl = Checklist {
+            id: new_id("cl"),
+            card_id: card.id.clone(),
+            ..cl.clone()
+        };
+        insert_checklist_row(conn, &ncl)?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT * FROM checklist_items WHERE checklist_id=?1 ORDER BY position",
+        )?;
+        let items: Vec<ChecklistItem> = stmt
+            .query_map([&cl.id], row_checklist_item)?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        for it in items {
+            insert_checklist_item_row(
+                conn,
+                &ChecklistItem {
+                    id: new_id("cli"),
+                    checklist_id: ncl.id.clone(),
+                    ..it
+                },
+            )?;
+        }
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT card_id, field_id, value FROM custom_field_values WHERE card_id=?1",
+    )?;
+    let fvs: Vec<CustomFieldValue> = stmt
+        .query_map([&src.id], row_field_value)?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for fv in fvs {
+        conn.execute(
+            "INSERT OR IGNORE INTO custom_field_values(card_id,field_id,value) VALUES(?1,?2,?3)",
+            params![&card.id, fv.field_id, fv.value],
+        )?;
+    }
+    created.push(card.clone());
+
+    // Sous-cartes : copie récursive (positions relatives entre sœurs conservées).
+    let mut stmt = conn.prepare_cached("SELECT * FROM cards WHERE parent_id=?1 ORDER BY position")?;
+    let children: Vec<Card> = stmt
+        .query_map([&src.id], row_card)?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(stmt);
+    for ch in children {
+        copy_card_tree(conn, &ch, Some(card.id.clone()), ch.position, None, created)?;
+    }
+    Ok(card)
+}
+
+/// Validate a reminder list: known relative offsets, parseable absolute dates.
+pub fn validate_reminders(list: &[Reminder]) -> Result<()> {
+    for r in list {
+        match r.kind.as_str() {
+            "relative" => {
+                if !REMINDER_OFFSETS.contains(&r.offset.as_deref().unwrap_or("")) {
+                    return Err(Error::Validation(format!(
+                        "offset de rappel invalide: {:?} (attendus: {})",
+                        r.offset.as_deref().unwrap_or_default(),
+                        REMINDER_OFFSETS.join(", ")
+                    )));
+                }
+            }
+            "absolute" => {
+                if crate::time::parse_dt(r.at.as_deref().unwrap_or("")).is_none() {
+                    return Err(Error::Validation(format!(
+                        "date de rappel invalide: {:?}",
+                        r.at.as_deref().unwrap_or_default()
+                    )));
+                }
+            }
+            other => {
+                return Err(Error::Validation(format!(
+                    "type de rappel invalide: {other} (attendus: relative, absolute)"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Advance `due` by one recurrence step (`{"freq":"daily|weekly|monthly",

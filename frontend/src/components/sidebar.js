@@ -27,6 +27,12 @@ export function renderSidebar(host) {
     </div>
 
     <div class="sidebar-body" id="sb-body">
+      <div class="section">
+        <button class="item ${state.view === 'home' ? 'active' : ''}" id="sb-overview" title="Vue d'ensemble (accueil)">
+          ${icon('dashboard', { size: 15 })}
+          <span class="name">Vue d'ensemble</span>
+        </button>
+      </div>
       ${board ? `
       <div class="section rail-views">
         <div class="label">
@@ -123,13 +129,17 @@ export function renderSidebar(host) {
       }
     } catch { /* JSON invalide → accent par défaut */ }
     return `
-      <div class="sb-board-row" data-board-row="${b.id}">
+      <div class="sb-board-row ${b.pinned ? 'pinned' : ''}" data-board-row="${b.id}">
         <button class="item ${active ? 'active' : ''}" data-board="${b.id}" title="${escapeHtml(b.title)}">
           <span class="dot" style="background:${dotBg};color:${color}"></span>
+          ${b.pinned ? `<span class="sb-pin-badge" title="Tableau épinglé">${icon('pin', { size: 11 })}</span>` : ''}
           <span class="name">${escapeHtml(b.title)}</span>
           ${count !== null ? `<span class="count">${count}</span>` : ''}
         </button>
         <div class="sb-board-actions">
+          <button class="iconbtn sb-board-pin" data-pin-board="${b.id}" title="${b.pinned ? 'Désépingler' : 'Épingler'} le tableau « ${escapeHtml(b.title)} »" style="${b.pinned ? 'color:var(--accent)' : ''}">
+            ${icon('pin', { size: 12 })}
+          </button>
           <button class="iconbtn sb-board-settings" data-settings-board="${b.id}" title="Paramètres du tableau « ${escapeHtml(b.title)} »">
             ${icon('settings', { size: 12 })}
           </button>
@@ -143,6 +153,19 @@ export function renderSidebar(host) {
   boardList.querySelectorAll('[data-board]').forEach((b) => {
     b.onclick = () => {
       navigate(boardUrl(b.dataset.board, 'board'));
+    };
+  });
+  boardList.querySelectorAll('[data-pin-board]').forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const bid = btn.dataset.pinBoard;
+      const b = state.boards.find((x) => x.id === bid);
+      if (!b) return;
+      try {
+        await api.updateBoard(bid, { pinned: !b.pinned });
+        await loadBoards();
+        renderSidebar(host);
+      } catch (err) { toast(err.message, 'err'); }
     };
   });
   boardList.querySelectorAll('[data-settings-board]').forEach((b) => {
@@ -206,16 +229,61 @@ export function renderSidebar(host) {
 
   host.querySelector('#sb-new').onclick = async (e) => {
     e.stopPropagation();
-    const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Lancement produit');
-    if (!name) return;
-    const b = await api.createBoard({ title: name });
-    localStorage.setItem('krello-boards-collapsed', 'false');
-    await loadBoards();
-    navigate(boardUrl(b.id, 'board'));
+    const finish = async (tplId, name) => {
+      try {
+        const b = tplId
+          ? await api.instantiateBoardTemplate(tplId, name ? { title: name } : {})
+          : await api.createBoard({ title: name });
+        localStorage.setItem('krello-boards-collapsed', 'false');
+        await loadBoards();
+        navigate(boardUrl(b.id, 'board'));
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    let templates = [];
+    try { templates = await api.boardTemplatesGallery(); } catch { templates = []; }
+    if (!templates.length) {
+      const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Lancement produit');
+      if (!name) return;
+      return finish(null, name);
+    }
+    // Galerie : board vide ou instanciation d'un modèle enregistré.
+    const { el: dlg, close } = openModal(`
+      <div class="dialog-header">
+        <div class="dialog-badge">${icon('boards', { size: 18 })}</div>
+        <div>
+          <h3>Nouveau board</h3>
+          <p class="muted" style="font-size:12.5px;margin:0">Partir de zéro ou instancier un modèle enregistré.</p>
+        </div>
+      </div>
+      <div class="dialog-body" style="gap:8px">
+        <button class="btn ghost sm" data-new-empty style="justify-content:flex-start;width:100%;text-align:left">
+          ＋ Board vide…
+        </button>
+        ${templates.map((t) => `
+          <button class="btn ghost sm" data-new-tpl="${t.id}" style="justify-content:flex-start;width:100%;text-align:left">
+            ${icon('kanban', { size: 14 })} <b>${escapeHtml(t.title)}</b>${t.template_description ? `<span class="muted" style="font-size:12px"> — ${escapeHtml(t.template_description)}</span>` : ''}
+          </button>`).join('')}
+      </div>`);
+    dlg.addEventListener('click', async (ev) => {
+      const empty = ev.target.closest('[data-new-empty]');
+      const tpl = ev.target.closest('[data-new-tpl]');
+      if (!empty && !tpl) return;
+      close();
+      if (empty) {
+        const name = await promptDialog('Nom du nouveau board', '', 'Ex. : Lancement produit');
+        if (name) finish(null, name);
+      } else {
+        finish(tpl.dataset.newTpl, null);
+      }
+    });
   };
 
   host.querySelector('#sb-palette').onclick = () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+  };
+
+  host.querySelector('#sb-overview').onclick = () => {
+    navigate('#/');
   };
 
   host.querySelector('#sb-settings').onclick = () => {

@@ -35,6 +35,10 @@ impl Service {
             deadline: c.deadline,
             settings: "{}".into(),
             archived: false,
+            pinned: false,
+            pinned_at: None,
+            is_board_template: false,
+            template_description: None,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -60,9 +64,9 @@ impl Service {
     pub fn list_boards(&self, include_archived: bool) -> Result<Vec<Board>> {
         let db = self.lock_db()?;
         let sql = if include_archived {
-            "SELECT * FROM boards ORDER BY created_at"
+            "SELECT * FROM boards WHERE is_board_template = 0 ORDER BY pinned DESC, pinned_at DESC, created_at"
         } else {
-            "SELECT * FROM boards WHERE archived = 0 ORDER BY created_at"
+            "SELECT * FROM boards WHERE archived = 0 AND is_board_template = 0 ORDER BY pinned DESC, pinned_at DESC, created_at"
         };
         let mut stmt = db.conn.prepare_cached(sql)?;
         let boards = stmt
@@ -132,6 +136,10 @@ impl Service {
         }
         if let Some(v) = u.archived {
             after.archived = v;
+        }
+        if let Some(v) = u.pinned {
+            after.pinned = v;
+            after.pinned_at = if v { Some(now_rfc3339()) } else { None };
         }
         after.updated_at = now_updated();
         update_board_row(&db.conn, &after)?;
@@ -327,7 +335,14 @@ impl Service {
 
     /// Deep-copy a board (labels, lists, non-archived cards with children,
     /// custom fields, dependencies, automations). Returns the new board.
-    pub fn duplicate_board(&self, id: &str) -> Result<Board> {
+    /// `title_override` renames the copy; `keep_template` preserves the
+    /// template flag (duplicating a template) — instantiation passes false.
+    pub fn duplicate_board_opts(
+        &self,
+        id: &str,
+        title_override: Option<String>,
+        keep_template: bool,
+    ) -> Result<Board> {
         let mut guard = self.lock_db()?;
         let tx = guard.conn.transaction()?;
         let db = &*tx;
@@ -336,7 +351,15 @@ impl Service {
         let now = now_rfc3339();
         let mut new_board = src.clone();
         new_board.id = new_id("board");
-        new_board.title = format!("{} (copie)", src.title);
+        new_board.title =
+            title_override.unwrap_or_else(|| format!("{} (copie)", src.title));
+        // La copie n'hérite pas du statut épinglé.
+        new_board.pinned = false;
+        new_board.pinned_at = None;
+        if !keep_template {
+            new_board.is_board_template = false;
+            new_board.template_description = None;
+        }
         new_board.created_at = now.clone();
         new_board.updated_at = now;
         insert_board_row(db, &new_board)?;
@@ -496,13 +519,80 @@ impl Service {
         drop(guard);
         crate::scheduler::recompute_service(self, &new_board.id)?;
         self.push_undo(UndoEntry {
-            label: format!("Duplication du board « {} »", src.title),
+            label: if keep_template {
+                format!("Duplication du board « {} »", src.title)
+            } else {
+                format!("Instanciation du modèle « {} »", src.title)
+            },
             actions: vec![UndoAction::BoardCreated(new_board.clone())],
         });
         self.emit(Event::BoardCreated {
             board_id: new_board.id.clone(),
         });
         Ok(new_board)
+    }
+
+    /// Duplicating keeps the template flag (gallery variant management).
+    pub fn duplicate_board(&self, id: &str) -> Result<Board> {
+        self.duplicate_board_opts(id, None, true)
+    }
+
+    /// Saved board templates (gallery), oldest first.
+    pub fn list_board_templates(&self) -> Result<Vec<Board>> {
+        let db = self.lock_db()?;
+        let mut stmt = db.conn.prepare_cached(
+            "SELECT * FROM boards WHERE is_board_template=1 AND archived=0 ORDER BY created_at",
+        )?;
+        let boards = stmt.query_map([], row_board)?.collect::<rusqlite::Result<_>>()?;
+        Ok(boards)
+    }
+
+    /// Toggle the template flag on a board ("Enregistrer comme modèle").
+    pub fn set_board_template(&self, id: &str, s: SetBoardTemplate) -> Result<Board> {
+        let db = self.lock_db()?;
+        let before =
+            query_board(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("board {id}")))?;
+        let mut after = before.clone();
+        after.is_board_template = s.is_template;
+        after.template_description = if s.is_template {
+            s.template_description.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+        } else {
+            None
+        };
+        after.updated_at = now_updated();
+        update_board_row(&db.conn, &after)?;
+        self.push_undo(UndoEntry {
+            label: if after.is_board_template {
+                format!("Conversion du board « {} » en modèle", after.title)
+            } else {
+                format!("Reconversion du board « {} » en tableau", after.title)
+            },
+            actions: vec![UndoAction::BoardUpdated {
+                before,
+                after: after.clone(),
+            }],
+        });
+        self.emit(Event::BoardUpdated {
+            board_id: id.to_string(),
+        });
+        Ok(after)
+    }
+
+    /// Instantiate a saved board template: deep copy, renamed (template title
+    /// by default), and never a template itself.
+    pub fn instantiate_board_template(&self, id: &str, title: Option<String>) -> Result<Board> {
+        let src = self.get_board(id)?;
+        if !src.is_board_template {
+            return Err(Error::Validation(format!(
+                "le board « {} » n'est pas un modèle",
+                src.title
+            )));
+        }
+        let title = title
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .or_else(|| Some(src.title.clone()));
+        self.duplicate_board_opts(id, title, false)
     }
 
     /// Recent activity entries for a board (global feed, newest first).
@@ -513,6 +603,114 @@ impl Service {
             .query_map(params![board_id, limit.clamp(1, 500)], row_activity)?
             .collect::<rusqlite::Result<_>>()?;
         Ok(acts)
+    }
+
+    /// Cross-board overview: totals, per-board rollup and recent activity.
+    pub fn global_stats(&self) -> Result<serde_json::Value> {
+        let db = self.lock_db()?;
+        let today_nd = crate::time::today();
+        let today = today_nd.to_string();
+        let in7 = crate::time::add_days(today_nd, 7).to_string();
+        let in7ago = crate::time::add_days(today_nd, -7).to_string();
+
+        let (boards, cards_active, overdue, due_7d, done_7d) = db.conn.query_row(
+            "SELECT
+               (SELECT COUNT(*) FROM boards WHERE archived=0 AND is_board_template=0),
+               (SELECT COUNT(*) FROM cards WHERE archived=0 AND is_template=0),
+               (SELECT COUNT(*) FROM cards WHERE archived=0 AND is_template=0 AND due_complete=0
+                  AND due IS NOT NULL AND substr(due,1,10) < ?1),
+               (SELECT COUNT(*) FROM cards WHERE archived=0 AND is_template=0 AND due_complete=0
+                  AND due IS NOT NULL AND substr(due,1,10) >= ?1 AND substr(due,1,10) <= ?2),
+               (SELECT COUNT(*) FROM cards WHERE completed_at IS NOT NULL
+                  AND substr(completed_at,1,10) >= ?3)",
+            params![today, in7, in7ago],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            },
+        )?;
+
+        let mut stmt = db.conn.prepare_cached(
+            "SELECT b.id, b.title,
+               SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS active,
+               SUM(CASE WHEN c.due IS NOT NULL AND c.due_complete=0
+                         AND substr(c.due,1,10) < ?1 THEN 1 ELSE 0 END) AS overdue
+             FROM boards b
+             LEFT JOIN cards c ON c.board_id = b.id AND c.archived=0 AND c.is_template=0
+             WHERE b.archived=0 AND b.is_board_template=0
+             GROUP BY b.id
+             ORDER BY b.pinned DESC, b.pinned_at DESC, b.created_at",
+        )?;
+        let per_board: Vec<serde_json::Value> = stmt
+            .query_map(params![today], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "title": r.get::<_, String>(1)?,
+                    "active": r.get::<_, i64>(2)?,
+                    "overdue": r.get::<_, i64>(3)?,
+                }))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+
+        let mut stmt = db
+            .conn
+            .prepare_cached("SELECT * FROM activity ORDER BY created_at DESC LIMIT 20")?;
+        let activity: Vec<Activity> = stmt
+            .query_map([], row_activity)?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+
+        // Cartes urgentes actives (priorité urgent/high) des boards visibles.
+        let urgent_filter = "FROM cards c JOIN boards b ON b.id = c.board_id
+             WHERE c.archived=0 AND c.is_template=0 AND c.due_complete=0
+               AND c.priority IN ('urgent','high')
+               AND b.archived=0 AND b.is_board_template=0";
+        let mut stmt = db.conn.prepare_cached(&format!(
+            "SELECT c.* {urgent_filter}
+             ORDER BY CASE c.priority WHEN 'urgent' THEN 0 ELSE 1 END, c.due IS NULL, c.due
+             LIMIT 12"
+        ))?;
+        let urgent: Vec<Card> = stmt.query_map([], row_card)?.collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let urgent_total: i64 = db
+            .conn
+            .query_row(&format!("SELECT COUNT(*) {urgent_filter}"), [], |r| r.get(0))?;
+
+        // Échéances proches : aujourd'hui ≤ due ≤ aujourd'hui+2 (date-only).
+        let in2 = crate::time::add_days(today_nd, 2).to_string();
+        let due_filter = "FROM cards c JOIN boards b ON b.id = c.board_id
+             WHERE c.archived=0 AND c.is_template=0 AND c.due_complete=0
+               AND c.due IS NOT NULL AND substr(c.due,1,10) >= ?1 AND substr(c.due,1,10) <= ?2
+               AND b.archived=0 AND b.is_board_template=0";
+        let mut stmt = db.conn.prepare_cached(&format!(
+            "SELECT c.* {due_filter} ORDER BY c.due LIMIT 12"
+        ))?;
+        let due_soon: Vec<Card> =
+            stmt.query_map(params![today, in2], row_card)?.collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let due_soon_total: i64 = db
+            .conn
+            .query_row(&format!("SELECT COUNT(*) {due_filter}"), params![today, in2], |r| r.get(0))?;
+
+        Ok(serde_json::json!({
+            "boards": boards,
+            "cards_active": cards_active,
+            "overdue": overdue,
+            "due_7d": due_7d,
+            "done_7d": done_7d,
+            "per_board": per_board,
+            "activity": activity,
+            "urgent": urgent,
+            "urgent_total": urgent_total,
+            "due_soon": due_soon,
+            "due_soon_total": due_soon_total,
+        }))
     }
 
     pub(crate) fn recompute_and_notify(&self, board_id: &str) -> Result<()> {

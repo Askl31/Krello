@@ -25,6 +25,9 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards", get(list_boards).post(create_board).delete(delete_all_boards))
         .route("/boards/{id}", get(get_board).patch(update_board).delete(delete_board))
         .route("/boards/{id}/duplicate", post(duplicate_board))
+        .route("/boards/{id}/template", patch(set_board_template_route))
+        .route("/board-templates", get(board_templates_gallery))
+        .route("/board-templates/{id}/instantiate", post(instantiate_board_template_route))
         .route("/boards/{id}/activity", get(board_activity))
         .route("/boards/{id}/lists", get(list_lists).post(create_list))
         .route("/boards/{id}/cards", get(list_cards).post(create_card))
@@ -42,6 +45,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/boards/{id}/views", get(get_view_settings))
         // settings / backup
         .route("/settings/ui", get(get_ui_settings).put(put_ui_settings))
+        .route("/stats/global", get(global_stats_route))
         .route("/settings/backup", get(get_backup_settings).put(put_backup_settings))
         .route("/settings/backup/run", post(run_backup_now))
         .route("/settings/backup/pick", post(pick_backup_dir))
@@ -208,6 +212,61 @@ async fn delete_all_boards(State(state): State<SharedState>) -> ApiResult<Respon
 async fn duplicate_board(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     let service = state.service.clone();
     let board = blocking(move || service.duplicate_board(&id)).await?;
+    Ok((StatusCode::CREATED, Json(board)).into_response())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct BoardTemplateBody {
+    is_template: bool,
+    template_description: Option<String>,
+}
+
+async fn set_board_template_route(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Json(b): Json<BoardTemplateBody>,
+) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let board = blocking(move || {
+        service.set_board_template(
+            &id,
+            SetBoardTemplate {
+                is_template: b.is_template,
+                template_description: b.template_description,
+            },
+        )
+    })
+    .await?;
+    Ok(Json(board).into_response())
+}
+
+async fn board_templates_gallery(State(state): State<SharedState>) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let boards = blocking(move || service.list_board_templates()).await?;
+    Ok(Json(boards).into_response())
+}
+
+async fn global_stats_route(State(state): State<SharedState>) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let stats = blocking(move || service.global_stats()).await?;
+    Ok(Json(stats).into_response())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct InstantiateBoardBody {
+    title: Option<String>,
+}
+
+async fn instantiate_board_template_route(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    body: Option<Json<InstantiateBoardBody>>,
+) -> ApiResult<Response> {
+    let InstantiateBoardBody { title } = body.map(|Json(b)| b).unwrap_or_default();
+    let service = state.service.clone();
+    let board = blocking(move || service.instantiate_board_template(&id, title)).await?;
     Ok((StatusCode::CREATED, Json(board)).into_response())
 }
 
@@ -698,6 +757,7 @@ struct SearchQuery {
     due_after: Option<String>,
     has_due: Option<bool>,
     include_archived: Option<bool>,
+    include_comments: Option<bool>,
 }
 
 async fn search(State(state): State<SharedState>, Query(q): Query<SearchQuery>) -> ApiResult<Response> {
@@ -710,6 +770,7 @@ async fn search(State(state): State<SharedState>, Query(q): Query<SearchQuery>) 
         due_after: q.due_after,
         has_due: q.has_due,
         include_archived: q.include_archived.unwrap_or(false),
+        include_comments: q.include_comments.unwrap_or(true),
         limit: 200,
     };
     let cards = state

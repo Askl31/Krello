@@ -185,7 +185,7 @@ impl Service {
             card.list_id = new_list.id.clone();
             card.position = i as f64;
             card.completed_at = None;
-            card.reminder_sent_at = None;
+            card.reminders_sent = serde_json::Value::Null;
             card.created_at = now_rfc3339();
             card.updated_at = now_rfc3339();
             insert_card_row(db, &card)?;

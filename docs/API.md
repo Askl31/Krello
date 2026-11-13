@@ -16,10 +16,14 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 | `GET /boards?include_archived=` | liste |
 | `POST /boards` | `{title, description?, background?, calendar_id?, start_date?, deadline?}` |
 | `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade, undoable ⌘Z) · `DELETE /boards` → `{deleted: n}` = **tout supprimer** (boards archivés compris, pièces jointes purgées du disque, une seule entrée undo) |
-| `POST /boards/{id}/duplicate` | copie profonde |
+| `POST /boards/{id}/duplicate` | copie profonde (conserve le statut modèle s'il y en a un, jamais `pinned`) |
+| `PATCH /boards/{id}/template` | `{is_template, template_description?}` — bascule board ↔ **modèle de board** (galerie « Nouveau board ») |
+| `GET /board-templates` | galerie des modèles de board (exclus de `GET /boards`) |
+| `POST /board-templates/{id}/instantiate` | `{title?}` (défaut = titre du modèle) — instanciation = **copie profonde** (listes, cartes + sous-cartes, labels, champs, dépendances, règles), jamais un modèle ; undo en une entrée |
+| `GET /stats/global` | vue d'ensemble cross-board : `{boards, cards_active, overdue, due_7d, done_7d, per_board:[{id,title,active,overdue}], activity:[≤20], urgent:[≤12 cartes priorité urgent/high actives], urgent_total, due_soon:[≤12 cartes échéance aujourd'hui→+2 j], due_soon_total}` |
 | `GET /boards/{id}/activity?limit=&card_id=` | flux d'activité · `card_id` → activité de CETTE carte (section « Activité » de la modale) |
 | `GET /boards/{id}/lists` `POST` | listes |
-| `GET /boards/{id}/cards?include_archived=` `POST` | cartes |
+| `GET /boards/{id}/cards?include_archived=` `POST` | cartes · création en sous-carte : `parent_id` = carte de la **même liste** (sinon 400) |
 | `GET /boards/{id}/cards/meta` | métadonnées par carte en UNE requête : `{card_id: {label_ids, checklists_count, checklist_items, checklist_done, comments_count, attachments_count}}` (hydratation des tuiles sans N+1) |
 | `GET /boards/{id}/labels` `POST` | labels |
 | `GET /boards/{id}/fields` `POST` | champs personnalisés (définitions) |
@@ -36,9 +40,9 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 | `GET/PATCH/DELETE /lists/{id}` · `GET /lists/{id}/count` | count → `{count, wip_exceeded}` |
 | `POST /lists/{id}/duplicate` | duplie la liste : cartes non-archivées avec labels, checklists, champs personnalisés et pièces jointes (**fichiers dupliqués physiquement**) ; dépendances non copiées ; undoable en une opération |
 | `GET /cards/{id}` | détail complet : `{card, labels, checklists:[{…,items}], comments, attachments, custom_fields, dependencies_in/out, schedule}` |
-| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminder`: `"15m"\|"1h"\|"1d"\|"2d"` ou datetime ISO — **`""` = supprimer le rappel** ; tout changement de `due`/`reminder` réarme le rappel · `time_spent_minutes`: **banque un incrément** (+n, jamais un remplacement) · `tracking_started_at`: `"ISO datetime"` = session de suivi en cours, **`""` = arrêter (banque l'écart depuis le début)** |
+| `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminders`: `[{"kind":"relative","offset":"15m"\|"30m"\|"1h"\|"2h"\|"1d"\|"2d"\|"1w"} \| {"kind":"absolute","at":"ISO"}]` — **rappels multiples** ; `[]` = aucun ; tout changement de `due`/`reminders` réarme les rappels (offset invalide ou date absurde → 400) · `time_spent_minutes`: **banque un incrément** (+n, jamais un remplacement) · `tracking_started_at`: `"ISO datetime"` = session de suivi en cours, **`""` = arrêter (banque l'écart depuis le début)** |
 | `DELETE /cards/{id}` | suppression (undoable) |
-| `POST /cards/{id}/move` | `{list_id?, position? \| before? \| after?}` (cross-board ok) |
+| `POST /cards/{id}/move` | `{list_id?, parent_id?, position? \| before? \| after?}` (cross-board ok) · `parent_id`: `""` = top-level, `"card_x"` = sous-carte de cette carte (**même liste requise**, cycle → 400), absent = inchangé (même liste) ou détaché (autre liste) ; anchor `before`/`after` doit être au même niveau ; le positionnement se calcule parmi les frères du même parent |
 | `POST /cards/{id}/duplicate` | copie + enfants |
 | `PATCH /cards/{id}/template` | `{is_template, template_description?}` — bascule carte ↔ modèle (badge, aide galerie) |
 | `POST /cards/{id}/instantiate` | `{list_id, name?, keep?, at?: "top"\|"bottom", position?}` — instancie une carte depuis un modèle ; copie profonde en une transaction : titre + description toujours, puis selon `keep` (défaut tout) : `checklists` (items décochés, ids neufs), `labels`, `attachments` (octets dupliqués), `customFields`, `cover` ; jamais copiés : dates, `due_complete`/`pct_complete`, commentaires, activité. 404 si modèle/liste introuvable, 400 si non-modèle ou liste hors board |
@@ -99,8 +103,8 @@ CLI (binaire `krello` et binaire de l'app) : `task add --title "…" [--list "�
 Deep link enregistré sur macOS uniquement (Tauri `krello://`, plugin deep-link) ; Windows inchangé.
 
 ## Recherche & import
-`GET /search?q=&board_id=&list_id=&label_id=&priority=&due_before=&due_after=&has_due=` (FTS5 + filtres)
-`POST /import/trello` (body = JSON export Trello) · `POST /import/krello` (round-trip export).
+`GET /search?q=&board_id=&list_id=&label_id=&priority=&due_before=&due_after=&has_due=&include_archived=&include_comments=` (FTS5 + filtres ; `include_comments=true` par défaut : les cartes dont un **commentaire** matche sont retournées ; archivées incluses sur `include_archived=1`)
+`POST /import/trello` (body = JSON export Trello) · `POST /import/krello` (round-trip export, `parent_id` des sous-cartes remappé).
 
 ## Undo / Redo
 `POST /undo` · `POST /redo` → `{undone|redone: label|null}` · `GET /undo` (labels) · `DELETE /undo` (clear).
@@ -122,5 +126,5 @@ Deep link enregistré sur macOS uniquement (Tauri `krello://`, plugin deep-link)
 `AttachmentsUpdated`, `FieldsUpdated`, `DependenciesUpdated`, `ScheduleUpdated`,
 `AutomationsUpdated`, `BaselinesUpdated`, `CalendarsUpdated`, `UndoApplied`, `resync`,
 `ReminderDue` (rappel déclenché par le sweep : `{board_id, card_id, title, due}` — une seule
-fois par carte/échéance ; réémis si `due` ou `reminder` change).
+fois par **(rappel, échéance)** ; réémis si `due` ou `reminders` change).
 Format : `{"type": "...", "data": {...}}`.

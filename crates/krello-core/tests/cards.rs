@@ -4,6 +4,147 @@ use common::{board_with_list, make_card, test_service};
 use krello_core::models::*;
 
 #[test]
+fn subcards_create_cycle_orphan_and_archive() {
+    let s = test_service();
+    let (board_id, list_id) = board_with_list(&s);
+    let other = s.create_list(&board_id, CreateList { title: "Autre".into(), ..Default::default() }).unwrap();
+    let parent = make_card(&s, &list_id, "parent");
+    let child = s.create_card(&board_id, CreateCard {
+        title: "enfant".into(),
+        list_id: list_id.clone(),
+        parent_id: Some(parent.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+
+    // Sous-carte dans une autre liste → refusé.
+    let err = s.create_card(&board_id, CreateCard {
+        title: "refusé".into(),
+        list_id: other.id.clone(),
+        parent_id: Some(parent.id.clone()),
+        ..Default::default()
+    });
+    assert!(err.is_err(), "sous-carte hors liste du parent rejetée");
+
+    // Cycle : attacher le parent sous l'enfant → refusé. Auto-parentage aussi.
+    let err = s.move_card(&parent.id, MoveCard { parent_id: Some(child.id.clone()), ..Default::default() });
+    assert!(err.is_err(), "cycle parent/enfant rejeté");
+    let err = s.move_card(&parent.id, MoveCard { parent_id: Some(parent.id.clone()), ..Default::default() });
+    assert!(err.is_err(), "auto-parentage rejeté");
+
+    // Supprimer le parent → l'enfant devient top-level.
+    s.delete_card(&parent.id).unwrap();
+    let child = s.get_card(&child.id).unwrap();
+    assert!(child.parent_id.is_none(), "suppression du parent détache l'enfant");
+
+    // Archiver le parent détache aussi les enfants.
+    let p3 = make_card(&s, &list_id, "P3");
+    let c3 = s.create_card(&board_id, CreateCard {
+        title: "C3".into(),
+        list_id: list_id.clone(),
+        parent_id: Some(p3.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    s.update_card(&p3.id, UpdateCard { archived: Some(true), ..Default::default() }).unwrap();
+    let c3 = s.get_card(&c3.id).unwrap();
+    assert!(c3.parent_id.is_none(), "archivage du parent détache l'enfant");
+}
+
+#[test]
+fn subcards_wbs_hierarchical_and_duplicate_tree() {
+    let s = test_service();
+    let (board_id, list_id) = board_with_list(&s);
+    let a = make_card(&s, &list_id, "A");
+    let b = make_card(&s, &list_id, "B");
+    let a1 = s.create_card(&board_id, CreateCard {
+        title: "A1".into(),
+        list_id: list_id.clone(),
+        parent_id: Some(a.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    let a11 = s.create_card(&board_id, CreateCard {
+        title: "A11".into(),
+        list_id: list_id.clone(),
+        parent_id: Some(a1.id.clone()),
+        ..Default::default()
+    }).unwrap();
+
+    // WBS hiérarchique après recompute.
+    s.recompute_and_notify_public(&board_id).unwrap();
+    let wa = s.get_card(&a.id).unwrap().wbs;
+    let wb = s.get_card(&b.id).unwrap().wbs;
+    let wa1 = s.get_card(&a1.id).unwrap().wbs;
+    let wa11 = s.get_card(&a11.id).unwrap().wbs;
+    assert_eq!((wa.as_str(), wb.as_str(), wa1.as_str(), wa11.as_str()), ("1", "2", "1.1", "1.1.1"));
+
+    // Duplication en profondeur : A (copie) + A1 + A11, parents remappés.
+    let copy = s.duplicate_card(&a.id).unwrap();
+    assert_eq!(copy.title, "A (copie)");
+    let all = s.list_cards(&board_id, false).unwrap();
+    let copy_child = all.iter().find(|c| c.parent_id == Some(copy.id.clone())).expect("l'enfant copié pointe vers la copie");
+    assert_eq!(copy_child.title, "A1");
+    let copy_grand = all.iter().find(|c| c.parent_id == Some(copy_child.id.clone())).expect("le petit-enfant copié");
+    assert_eq!(copy_grand.title, "A11");
+
+    // Undo de la duplication : toute la sous-arborescence disparaît d'un coup.
+    s.undo().unwrap();
+    let after = s.list_cards(&board_id, false).unwrap();
+    assert!(after.iter().all(|c| c.title != "A (copie)"), "la copie est supprimée");
+    assert_eq!(after.len(), 4, "A, B, A1, A11 seulement");
+}
+
+#[test]
+fn subcards_move_rules() {
+    let s = test_service();
+    let (board_id, list_id) = board_with_list(&s);
+    let l2 = s.create_list(&board_id, CreateList { title: "L2".into(), ..Default::default() }).unwrap();
+    let p = make_card(&s, &list_id, "P");
+    let p2 = make_card(&s, &l2.id, "P2");
+    let c = s.create_card(&board_id, CreateCard {
+        title: "C".into(),
+        list_id: list_id.clone(),
+        parent_id: Some(p.id.clone()),
+        ..Default::default()
+    }).unwrap();
+
+    // Déplacer la sous-carte vers L2 → détachée (jamais de parent cross-liste).
+    let moved = s.move_card(&c.id, MoveCard { list_id: Some(l2.id.clone()), ..Default::default() }).unwrap();
+    assert!(moved.parent_id.is_none(), "changement de liste détache la sous-carte");
+
+    // Attacher à un parent d'une autre liste → refusé.
+    let err = s.move_card(&c.id, MoveCard { parent_id: Some(p.id.clone()), ..Default::default() });
+    assert!(err.is_err(), "parent hors liste rejeté");
+
+    // Attacher à P2 (même liste L2) → OK.
+    let moved = s.move_card(&c.id, MoveCard { parent_id: Some(p2.id.clone()), ..Default::default() }).unwrap();
+    assert_eq!(moved.parent_id.as_deref(), Some(p2.id.as_str()));
+
+    // before/after entre frères : ordre sous le même parent.
+    let c2 = s.create_card(&board_id, CreateCard {
+        title: "C2".into(),
+        list_id: l2.id.clone(),
+        parent_id: Some(p2.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    let c3 = s.create_card(&board_id, CreateCard {
+        title: "C3".into(),
+        list_id: l2.id.clone(),
+        parent_id: Some(p2.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    let moved3 = s.move_card(&c3.id, MoveCard {
+        before: Some(c2.id.clone()),
+        parent_id: Some(p2.id.clone()),
+        ..Default::default()
+    }).unwrap();
+    assert!(moved3.position < c2.position, "C3 inséré avant C2 parmi les frères de P2");
+
+    // Anchor à un autre niveau → refusée (cohérence front/backend).
+    let err = s.move_card(&c.id, MoveCard { before: Some(p.id.clone()), parent_id: Some(p2.id.clone()), ..Default::default() });
+    assert!(err.is_err(), "anchor hors niveau rejeté");
+}
+
+#[test]
 fn card_create_defaults_and_validation() {
     let s = test_service();
     let (board_id, list_id) = board_with_list(&s);
@@ -63,7 +204,7 @@ fn card_positions_increment_and_move() {
     assert_eq!((a.position, b.position, c.position), (0.0, 1.0, 2.0));
 
     // Move C to top of l1 (nothing above A → A.pos - 1)
-    let moved = s.move_card(&c.id, MoveCard { list_id: None, before: Some(a.id.clone()), after: None, position: None }).unwrap();
+    let moved = s.move_card(&c.id, MoveCard { list_id: None, parent_id: None, before: Some(a.id.clone()), after: None, position: None }).unwrap();
     assert_eq!(moved.position, -1.0);
 
     // Move B after C (cross-list to l2, appended)

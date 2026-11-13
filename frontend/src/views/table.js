@@ -39,7 +39,19 @@ export function renderTable() {
   const getter = get[sortKey];
   const keyed = cards.map((c) => ({ c, k: getter ? getter(c) : '' }));
   keyed.sort((a, b) => {
-    const cmp = a.k < b.k ? -1 : a.k > b.k ? 1 : 0;
+    let cmp;
+    if (sortKey === 'wbs') {
+      // Tri naturel hiérarchique : 1.2 AVANT 1.10 (comparaison par segments).
+      const as = String(a.k).split('.').map(Number);
+      const bs = String(b.k).split('.').map(Number);
+      cmp = 0;
+      for (let i = 0; i < Math.max(as.length, bs.length); i++) {
+        const d = (as[i] || 0) - (bs[i] || 0);
+        if (d) { cmp = d > 0 ? 1 : -1; break; }
+      }
+    } else {
+      cmp = a.k < b.k ? -1 : a.k > b.k ? 1 : 0;
+    }
     return cmp * sortDir;
   });
   cards = keyed.map((x) => x.c);

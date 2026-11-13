@@ -18,6 +18,9 @@ pub struct SearchFilters {
     pub due_after: Option<String>,
     pub has_due: Option<bool>,
     pub include_archived: bool,
+    /// Also match the FTS index of comment bodies (cards with a matching
+    /// comment are returned even if their title/description don't match).
+    pub include_comments: bool,
     pub limit: i64,
 }
 
@@ -40,14 +43,25 @@ pub fn search_cards(
 ) -> Result<Vec<Card>> {
     let fts = q.map(sanitize_fts).filter(|s| !s.is_empty());
     let mut sql = String::from("SELECT c.* FROM cards c");
-    if fts.is_some() {
+    if fts.is_some() && !f.include_comments {
         sql.push_str(" JOIN cards_fts f ON f.rowid = c.rowid");
     }
     sql.push_str(" WHERE 1=1 AND c.is_template = 0");
     let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(expr) = &fts {
         args.push(Box::new(expr.clone()));
-        sql.push_str(&format!(" AND cards_fts MATCH ?{}", args.len()));
+        if f.include_comments {
+            // Titre/description (cards_fts) OU corps d'un commentaire (comments_fts).
+            sql.push_str(&format!(
+                " AND (c.rowid IN (SELECT rowid FROM cards_fts WHERE cards_fts MATCH ?{n}) \
+                   OR c.id IN (SELECT cc.card_id FROM comments cc \
+                               JOIN comments_fts cf ON cf.rowid = cc.rowid \
+                               WHERE comments_fts MATCH ?{n}))",
+                n = args.len()
+            ));
+        } else {
+            sql.push_str(&format!(" AND cards_fts MATCH ?{}", args.len()));
+        }
     }
     if let Some(b) = &f.board_id {
         args.push(Box::new(b.clone()));
@@ -82,8 +96,10 @@ pub fn search_cards(
     if !f.include_archived {
         sql.push_str(" AND c.archived = 0");
     }
-    if fts.is_some() {
+    if fts.is_some() && !f.include_comments {
         sql.push_str(" ORDER BY rank");
+    } else if fts.is_some() {
+        sql.push_str(" ORDER BY c.updated_at DESC");
     } else {
         sql.push_str(" ORDER BY c.list_id, c.position");
     }
@@ -99,12 +115,15 @@ pub fn search_cards(
     Ok(cards)
 }
 
-/// Global search across all boards (home screen).
+/// Global search across all boards (home screen): includes archived cards and
+/// comment-body matches.
 pub fn search_global(conn: &rusqlite::Connection, q: &str, limit: i64) -> Result<Vec<Card>> {
     search_cards(
         conn,
         Some(q),
         &SearchFilters {
+            include_archived: true,
+            include_comments: true,
             limit: limit.clamp(1, 100),
             ..Default::default()
         },

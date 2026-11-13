@@ -72,6 +72,12 @@ function openPalette() {
 
   function baseItems() {
     const items = [];
+    items.push({
+      icon: icon('dashboard', { size: 15 }),
+      title: "Vue d'ensemble",
+      sub: 'accueil',
+      run: () => navigate('#/'),
+    });
     for (const b of state.boards) {
       items.push({
         icon: icon('boards', { size: 15 }),

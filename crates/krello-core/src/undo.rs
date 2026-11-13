@@ -344,6 +344,10 @@ pub fn row_board(r: &rusqlite::Row<'_>) -> rusqlite::Result<Board> {
         deadline: r.get("deadline")?,
         settings: r.get("settings")?,
         archived: r.get::<_, i64>("archived")? != 0,
+        pinned: r.get::<_, i64>("pinned")? != 0,
+        pinned_at: r.get("pinned_at")?,
+        is_board_template: r.get::<_, i64>("is_board_template")? != 0,
+        template_description: r.get("template_description")?,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
     })
@@ -377,9 +381,16 @@ pub fn row_card(r: &rusqlite::Row<'_>) -> rusqlite::Result<Card> {
         start: r.get("start")?,
         due: r.get("due")?,
         due_complete: r.get::<_, i64>("due_complete")? != 0,
-        reminder: r.get("reminder")?,
+        reminders: r
+            .get::<_, Option<String>>("reminders")?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
         recurrence: r.get("recurrence")?,
-        reminder_sent_at: r.get("reminder_sent_at")?,
+        reminders_sent: r
+            .get::<_, Option<String>>("reminders_sent")?
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .unwrap_or(serde_json::Value::Null),
+        parent_id: r.get("parent_id")?,
         priority: r.get("priority")?,
         is_milestone: r.get::<_, i64>("is_milestone")? != 0,
         duration_days: r.get("duration_days")?,
@@ -557,11 +568,12 @@ pub fn row_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
 
 pub fn insert_board_row(conn: &Connection, b: &Board) -> Result<()> {
     conn.execute(
-        "INSERT INTO boards(id,title,description,background,calendar_id,start_date,deadline,settings,archived,created_at,updated_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        "INSERT INTO boards(id,title,description,background,calendar_id,start_date,deadline,settings,archived,pinned,pinned_at,is_board_template,template_description,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
             b.id, b.title, b.description, b.background, b.calendar_id, b.start_date, b.deadline,
-            b.settings, b.archived as i64, b.created_at, b.updated_at
+            b.settings, b.archived as i64, b.pinned as i64, b.pinned_at,
+            b.is_board_template as i64, b.template_description, b.created_at, b.updated_at
         ],
     )?;
     Ok(())
@@ -570,10 +582,12 @@ pub fn insert_board_row(conn: &Connection, b: &Board) -> Result<()> {
 pub fn update_board_row(conn: &Connection, b: &Board) -> Result<()> {
     conn.execute(
         "UPDATE boards SET title=?2, description=?3, background=?4, calendar_id=?5, start_date=?6,
-         deadline=?7, settings=?8, archived=?9, updated_at=?10 WHERE id=?1",
+         deadline=?7, settings=?8, archived=?9, pinned=?10, pinned_at=?11, is_board_template=?12,
+         template_description=?13, updated_at=?14 WHERE id=?1",
         params![
             b.id, b.title, b.description, b.background, b.calendar_id, b.start_date, b.deadline,
-            b.settings, b.archived as i64, b.updated_at
+            b.settings, b.archived as i64, b.pinned as i64, b.pinned_at,
+            b.is_board_template as i64, b.template_description, b.updated_at
         ],
     )?;
     Ok(())
@@ -600,39 +614,47 @@ pub fn update_list_row(conn: &Connection, l: &List) -> Result<()> {
 }
 
 pub fn insert_card_row(conn: &Connection, c: &Card) -> Result<()> {
+    let reminders_json = serde_json::to_string(&c.reminders).unwrap_or_else(|_| "[]".into());
+    let sent_json =
+        if c.reminders_sent.is_null() { None } else { Some(c.reminders_sent.to_string()) };
     conn.execute(
         "INSERT INTO cards(id,board_id,list_id,title,description,position,archived,cover,start,due,
-         due_complete,reminder,recurrence,priority,is_milestone,duration_days,work_hours,pct_complete,
+         due_complete,reminders,parent_id,recurrence,priority,is_milestone,duration_days,work_hours,pct_complete,
          task_type,units,hours_per_day,constraint_type,constraint_date,wbs,cost,created_at,updated_at,completed_at,
-         is_template,template_description,reminder_sent_at,time_spent_minutes,tracking_started_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)",
+         is_template,template_description,reminders_sent,time_spent_minutes,tracking_started_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34)",
         params![
             c.id, c.board_id, c.list_id, c.title, c.description, c.position, c.archived as i64,
-            c.cover, c.start, c.due, c.due_complete as i64, c.reminder, c.recurrence, c.priority,
+            c.cover, c.start, c.due, c.due_complete as i64, reminders_json, c.parent_id,
+            c.recurrence, c.priority,
             c.is_milestone as i64, c.duration_days, c.work_hours, c.pct_complete, c.task_type,
             c.units, c.hours_per_day, c.constraint_type, c.constraint_date, c.wbs, c.cost,
             c.created_at, c.updated_at, c.completed_at, c.is_template as i64, c.template_description,
-            c.reminder_sent_at, c.time_spent_minutes, c.tracking_started_at
+            sent_json, c.time_spent_minutes, c.tracking_started_at
         ],
     )?;
     Ok(())
 }
 
 pub fn update_card_row(conn: &Connection, c: &Card) -> Result<()> {
+    let reminders_json = serde_json::to_string(&c.reminders).unwrap_or_else(|_| "[]".into());
+    let sent_json =
+        if c.reminders_sent.is_null() { None } else { Some(c.reminders_sent.to_string()) };
     conn.execute(
         "UPDATE cards SET board_id=?2, list_id=?3, title=?4, description=?5, position=?6, archived=?7,
-         cover=?8, start=?9, due=?10, due_complete=?11, reminder=?12, recurrence=?13, priority=?14,
-         is_milestone=?15, duration_days=?16, work_hours=?17, pct_complete=?18, task_type=?19,
-         units=?20, hours_per_day=?21, constraint_type=?22, constraint_date=?23, wbs=?24, cost=?25,
-         updated_at=?26, completed_at=?27, is_template=?28, template_description=?29,
-         reminder_sent_at=?30, time_spent_minutes=?31, tracking_started_at=?32 WHERE id=?1",
+         cover=?8, start=?9, due=?10, due_complete=?11, reminders=?12, parent_id=?13, recurrence=?14,
+         priority=?15, is_milestone=?16, duration_days=?17, work_hours=?18, pct_complete=?19,
+         task_type=?20, units=?21, hours_per_day=?22, constraint_type=?23, constraint_date=?24,
+         wbs=?25, cost=?26, updated_at=?27, completed_at=?28, is_template=?29, template_description=?30,
+         reminders_sent=?31, time_spent_minutes=?32, tracking_started_at=?33 WHERE id=?1",
         params![
             c.id, c.board_id, c.list_id, c.title, c.description, c.position, c.archived as i64,
-            c.cover, c.start, c.due, c.due_complete as i64, c.reminder, c.recurrence, c.priority,
+            c.cover, c.start, c.due, c.due_complete as i64, reminders_json, c.parent_id,
+            c.recurrence, c.priority,
             c.is_milestone as i64, c.duration_days, c.work_hours, c.pct_complete, c.task_type,
             c.units, c.hours_per_day, c.constraint_type, c.constraint_date, c.wbs, c.cost,
             c.updated_at, c.completed_at, c.is_template as i64, c.template_description,
-            c.reminder_sent_at, c.time_spent_minutes, c.tracking_started_at
+            sent_json, c.time_spent_minutes, c.tracking_started_at
         ],
     )?;
     Ok(())

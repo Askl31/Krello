@@ -421,34 +421,38 @@ impl Service {
         Ok(())
     }
 
-    /// Resolve the moment a reminder should fire: an ISO datetime is absolute,
-    /// "15m"|"1h"|"1d"|"2d" means N before the due date (local time).
-    pub fn reminder_moment(reminder: &str, due: &str) -> Option<chrono::NaiveDateTime> {
-        if let Some(dt) = crate::time::parse_dt(reminder) {
-            return Some(dt);
+    /// Trigger moment of one reminder: absolute `at`, or the due date minus
+    /// the relative offset (local time).
+    pub fn reminder_moment(r: &Reminder, due: &str) -> Option<chrono::NaiveDateTime> {
+        match r.kind.as_str() {
+            "absolute" => crate::time::parse_dt(r.at.as_deref()?),
+            "relative" => {
+                let mins: i64 = match r.offset.as_deref()?.trim() {
+                    "15m" => 15,
+                    "30m" => 30,
+                    "1h" => 60,
+                    "2h" => 120,
+                    "1d" => 60 * 24,
+                    "2d" => 120 * 24,
+                    "1w" => 60 * 24 * 7,
+                    _ => return None,
+                };
+                Some(crate::time::parse_dt(due)? - chrono::Duration::minutes(mins))
+            }
+            _ => None,
         }
-        let mins: i64 = if let Some(r) = reminder.trim().strip_suffix('m') {
-            r.parse().ok()?
-        } else if let Some(r) = reminder.trim().strip_suffix('h') {
-            r.parse::<i64>().ok()? * 60
-        } else if let Some(r) = reminder.trim().strip_suffix('d') {
-            r.parse::<i64>().ok()? * 60 * 24
-        } else {
-            return None;
-        };
-        let due_dt = crate::time::parse_dt(due)?;
-        Some(due_dt - chrono::Duration::minutes(mins))
     }
 
     /// Fire reminders whose moment is reached and not sent yet. One event per
-    /// card; `reminder_sent_at` (reset whenever due/reminder changes) prevents
-    /// duplicates. Archived cards, templates, done cards and cards without a
-    /// parseable due/reminder are ignored. Returns the number of events fired.
+    /// (reminder, due); the `reminders_sent` map keyed "<idx>|<due>" prevents
+    /// duplicates and is cleared by the service whenever due/reminders change.
+    /// Archived cards, templates, done cards and cards without a parseable
+    /// due/reminders are ignored. Returns the number of events fired.
     pub fn fire_due_reminders(&self) -> Result<usize> {
         let now = chrono::Local::now().naive_local();
         let db = self.lock_db()?;
-        let mut stmt = db.conn.prepare_cached("SELECT id, board_id, title, due, reminder, reminder_sent_at FROM cards
-         WHERE reminder IS NOT NULL AND reminder != '' AND due IS NOT NULL
+        let mut stmt = db.conn.prepare_cached("SELECT id, board_id, title, due, reminders, reminders_sent FROM cards
+         WHERE reminders IS NOT NULL AND reminders != '[]' AND reminders != 'null' AND due IS NOT NULL
            AND due_complete=0 AND archived=0 AND is_template=0")?;
         let targets: Vec<(String, String, String, String, String, Option<String>)> = {
             let rows = stmt.query_map([], |r| {
@@ -457,7 +461,7 @@ impl Service {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(4)?.unwrap_or_else(|| "[]".into()),
                     r.get::<_, Option<String>>(5)?,
                 ))
             })?;
@@ -465,29 +469,42 @@ impl Service {
         };
         drop(stmt);
         let mut fired = 0;
-        for (id, board_id, title, due, reminder, sent) in targets {
-            let Some(remind_at) = Self::reminder_moment(&reminder, &due) else {
+        for (id, board_id, title, due, reminders_json, sent_json) in targets {
+            let Ok(reminders) = serde_json::from_str::<Vec<Reminder>>(&reminders_json) else {
                 continue;
             };
-            if let Some(sent_at) = sent.as_deref().and_then(crate::time::parse_dt) {
-                if sent_at >= remind_at {
+            let mut sent: std::collections::HashMap<String, bool> = sent_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            let mut changed = false;
+            for (idx, r) in reminders.iter().enumerate() {
+                let Some(remind_at) = Self::reminder_moment(r, &due) else {
+                    continue;
+                };
+                let key = format!("{idx}|{due}");
+                if sent.contains_key(&key) {
                     continue; // déjà envoyé pour cette échéance
                 }
+                if now < remind_at {
+                    continue; // pas encore l'heure
+                }
+                sent.insert(key, true);
+                changed = true;
+                self.emit(Event::ReminderDue {
+                    board_id: board_id.clone(),
+                    card_id: id.clone(),
+                    title: title.clone(),
+                    due: due.clone(),
+                });
+                fired += 1;
             }
-            if now < remind_at {
-                continue; // pas encore l'heure
+            if changed {
+                db.conn.execute(
+                    "UPDATE cards SET reminders_sent=?2 WHERE id=?1",
+                    params![id, serde_json::to_string(&sent).unwrap_or_else(|_| "{}".into())],
+                )?;
             }
-            db.conn.execute(
-                "UPDATE cards SET reminder_sent_at=?2 WHERE id=?1",
-                params![id, crate::time::now_rfc3339()],
-            )?;
-            self.emit(Event::ReminderDue {
-                board_id,
-                card_id: id,
-                title,
-                due,
-            });
-            fired += 1;
         }
         Ok(fired)
     }
@@ -1082,8 +1099,9 @@ fn apply_action(
                 start: None,
                 due: None,
                 due_complete: false,
-                reminder: None,
-                reminder_sent_at: None,
+                reminders: Vec::new(),
+                reminders_sent: serde_json::Value::Null,
+                parent_id: None,
                 time_spent_minutes: 0,
                 tracking_started_at: None,
                 recurrence: None,
@@ -1226,8 +1244,9 @@ fn apply_action(
                 start: None,
                 due: None,
                 due_complete: false,
-                reminder: None,
-                reminder_sent_at: None,
+                reminders: Vec::new(),
+                reminders_sent: serde_json::Value::Null,
+                parent_id: None,
                 time_spent_minutes: 0,
                 tracking_started_at: None,
                 recurrence: None,

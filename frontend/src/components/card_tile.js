@@ -16,6 +16,10 @@ export function cardTileHtml(card, opts = {}) {
   const cover = card.cover ? safeCover(card.cover) : '';
   const hasCover = !!cover;
   const selected = !!opts.selected;
+  const depth = Number(opts.depth) || 0;
+  const subBadge = opts.subLabel
+    ? `<span class="badge" style="color:var(--muted);background:var(--surface);border-color:var(--border)">${icon('chevronDown', { size: 10 })} ${escapeHtml(opts.subLabel)}</span>`
+    : '';
   const milestone = card.is_milestone
     ? `<span class="badge" style="color:var(--warning);background:var(--warning-soft);border-color:color-mix(in srgb,var(--warning)35%,transparent)">${icon('milestone', { size: 10 })} jalon</span>`
     : '';
@@ -31,7 +35,7 @@ export function cardTileHtml(card, opts = {}) {
   ].join('');
 
   return `
-    <div class="card-tile ${hasCover ? 'has-cover' : ''} ${selected ? 'selected' : ''}" data-card="${card.id}">
+    <div class="card-tile ${hasCover ? 'has-cover' : ''} ${selected ? 'selected' : ''} ${depth ? 'subcard' : ''}" data-card="${card.id}"${depth ? ` style="margin-left:${Math.min(depth, 4) * 18}px"` : ''}>
       ${cover}
       <div class="title ${card.due_complete ? 'done' : ''}">${escapeHtml(card.title)}</div>
       <div class="meta">
@@ -43,6 +47,7 @@ export function cardTileHtml(card, opts = {}) {
         ${duration}
         ${pct !== null ? `<span class="badge" style="color:var(--success);background:var(--success-soft);border-color:color-mix(in srgb,var(--success)35%,transparent)">${icon('check', { size: 11 })} ${pct}%</span>` : ''}
         ${counts}
+        ${subBadge}
       </div>
     </div>`;
 }

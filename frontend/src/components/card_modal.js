@@ -222,6 +222,23 @@ export async function openCardModal(cardId, { onChange } = {}) {
     const pct = progressOf(checklists);
     const currentCover = getCoverValue(card.cover);
 
+    // Candidats comme carte parente : même liste, actives, hors soi et hors
+    // propre descendance (anti-cycle).
+    const sameListCandidates = (() => {
+      const byId = new Map(state.cards.map((c) => [c.id, c]));
+      const isDesc = (c) => {
+        let p = c.parent_id;
+        while (p) {
+          if (p === card.id) return true;
+          p = byId.get(p)?.parent_id || null;
+        }
+        return false;
+      };
+      return state.cards
+        .filter((c) => c.list_id === card.list_id && !c.archived && !c.is_template && c.id !== card.id && !isDesc(c))
+        .sort((a, b) => a.position - b.position);
+    })();
+
     const { el, close } = openModal(`
       <div class="modal-head">
         <h2 data-edit="title" title="Cliquez pour modifier le titre" style="cursor:pointer">${escapeHtml(card.title)}</h2>
@@ -335,14 +352,16 @@ export async function openCardModal(cardId, { onChange } = {}) {
                 <input type="date" class="input" id="cm-start" value="${dateOnly(card.start)}" />
               </div>
               <div class="field">
-                <label>Rappel</label>
-                <select class="input" id="cm-reminder">
-                  <option value="" ${card.reminder ? '' : 'selected'}>Aucun</option>
-                  <option value="15m" ${card.reminder === '15m' ? 'selected' : ''}>15 min avant l'échéance</option>
-                  <option value="1h" ${card.reminder === '1h' ? 'selected' : ''}>1 h avant</option>
-                  <option value="1d" ${card.reminder === '1d' ? 'selected' : ''}>1 jour avant</option>
-                  <option value="2d" ${card.reminder === '2d' ? 'selected' : ''}>2 jours avant</option>
+                <label>Carte parente</label>
+                <select class="input" id="cm-parent" title="Rattacher cette carte comme sous-carte d'une carte de la même liste">
+                  <option value="" ${card.parent_id ? '' : 'selected'}>— Aucune (top-level) —</option>
+                  ${sameListCandidates.map((p) => `<option value="${p.id}" ${card.parent_id === p.id ? 'selected' : ''}>${escapeHtml(p.title)}</option>`).join('')}
                 </select>
+              </div>
+              <div class="field">
+                <label>Rappels</label>
+                <div id="cm-reminders"></div>
+                <button type="button" class="btn ghost sm" id="cm-add-reminder" style="margin-top:6px">＋ Ajouter un rappel</button>
               </div>
               `}
               <div class="field">
@@ -640,6 +659,15 @@ export async function openCardModal(cardId, { onChange } = {}) {
       ).join('') || '<option value="">—</option>';
     };
     moveBoard?.addEventListener('change', () => fillMoveLists(moveBoard.value));
+
+    // --- sous-carte : rattachement à une carte parente de la même liste
+    el.querySelector('#cm-parent')?.addEventListener('change', async (e) => {
+      try {
+        await api.moveCard(card.id, { list_id: card.list_id, parent_id: e.target.value });
+        toast(e.target.value ? 'Carte rattachée au parent' : 'Carte détachée (top-level)', 'ok');
+        close();
+      } catch (err) { toast(err.message, 'err'); }
+    });
     moveList?.addEventListener('change', async () => {
       if (!moveList.value) return;
       try {
@@ -667,7 +695,57 @@ export async function openCardModal(cardId, { onChange } = {}) {
     });
     el.querySelector('#cm-due-complete')?.addEventListener('change', (e) => upd({ due_complete: e.target.checked }));
     el.querySelector('#cm-start')?.addEventListener('change', (e) => upd({ start: e.target.value || null }));
-    el.querySelector('#cm-reminder')?.addEventListener('change', (e) => upd({ reminder: e.target.value }));
+    // --- rappels multiples (relatifs à l'échéance ou date fixe)
+    const OFFSETS = [['15m', '15 min avant'], ['30m', '30 min avant'], ['1h', '1 h avant'], ['2h', '2 h avant'], ['1d', '1 jour avant'], ['2d', '2 jours avant'], ['1w', '1 semaine avant']];
+    let reminders = Array.isArray(card.reminders) ? [...card.reminders] : [];
+    const remWrap = el.querySelector('#cm-reminders');
+    const renderReminders = () => {
+      remWrap.innerHTML = reminders.length ? reminders.map((r, i) => `
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+          <select class="input" data-rkind="${i}" style="flex:0 0 118px" title="Type de rappel">
+            <option value="relative" ${r.kind === 'relative' ? 'selected' : ''}>Avant l'échéance</option>
+            <option value="absolute" ${r.kind === 'absolute' ? 'selected' : ''}>Date fixe</option>
+          </select>
+          ${r.kind === 'absolute'
+            ? `<input type="datetime-local" class="input" data-rat="${i}" value="${String(r.at || '').slice(0, 16)}" style="flex:1" title="Date et heure du rappel">`
+            : `<select class="input" data-roffset="${i}" style="flex:1" title="Délai avant l'échéance">
+                ${OFFSETS.map(([v, lbl]) => `<option value="${v}" ${r.offset === v ? 'selected' : ''}>${lbl}</option>`).join('')}
+              </select>`}
+          <button type="button" class="iconbtn" data-rdel="${i}" title="Supprimer ce rappel" style="flex:none">✕</button>
+        </div>`).join('')
+        : `<div class="muted" style="font-size:12.5px">Aucun rappel</div>`;
+    };
+    const saveReminders = () => {
+      renderReminders();
+      upd({ reminders });
+    };
+    renderReminders();
+    remWrap.addEventListener('change', (e) => {
+      const t = e.target;
+      const i = Number(t.dataset.rkind ?? t.dataset.roffset ?? t.dataset.rat);
+      if (Number.isNaN(i) || !reminders[i]) return;
+      if (t.dataset.rkind !== undefined) {
+        reminders[i] = t.value === 'absolute'
+          ? { kind: 'absolute', at: `${new Date().toISOString().slice(0, 10)}T09:00` }
+          : { kind: 'relative', offset: '15m' };
+      } else if (t.dataset.roffset !== undefined) {
+        reminders[i] = { kind: 'relative', offset: t.value };
+      } else if (t.dataset.rat !== undefined) {
+        const v = t.value; // "YYYY-MM-DDTHH:MM"
+        reminders[i] = { kind: 'absolute', at: v.length === 16 ? `${v}:00` : v };
+      }
+      saveReminders();
+    });
+    remWrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rdel]');
+      if (!btn) return;
+      reminders.splice(Number(btn.dataset.rdel), 1);
+      saveReminders();
+    });
+    el.querySelector('#cm-add-reminder')?.addEventListener('click', () => {
+      reminders.push({ kind: 'relative', offset: '15m' });
+      saveReminders();
+    });
     el.querySelector('#cm-priority').onchange = (e) => upd({ priority: e.target.value });
     el.querySelector('#cm-duration').onchange = (e) => upd({ duration_days: e.target.value === '' ? null : Number(e.target.value) });
     el.querySelector('#cm-work').onchange = (e) => upd({ work_hours: e.target.value === '' ? null : Number(e.target.value) });
