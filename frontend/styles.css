@@ -1375,6 +1375,32 @@ textarea.input {
   background: var(--accent);
 }
 
+/* Indicateur de drop vertical (réordonnancement des listes dans le board) */
+.drop-line.vertical {
+  width: 3px;
+  height: auto;
+  align-self: stretch;
+  margin: 6px 2px;
+}
+
+.drop-line.vertical::before {
+  left: -3px;
+  top: -4px;
+}
+
+/* Poignée de drag des listes (affordance du réordonnancement) */
+.list-drag-handle {
+  display: inline-flex;
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: grab;
+  flex: none;
+}
+
+.list:hover .list-drag-handle {
+  opacity: 1;
+}
+
 /* Kanban en mode clair : colonnes en gris doux et cartes blanches en élévation */
 html[data-theme="light"] .list {
   background: var(--bg-soft);

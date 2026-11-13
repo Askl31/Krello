@@ -39,6 +39,29 @@ function updateDropIndicator(targetEl, clientY, sourceEl) {
   }
 }
 
+/// Indicateur de drop VERTICAL pour les listes (colonne cible dans le board) :
+/// s'insère avant la liste sous le curseur, sinon après la dernière (avant le
+/// bouton « Ajouter une liste »).
+function updateListDropIndicator(targetEl, clientX, sourceEl) {
+  const boardEl = document.querySelector('#board');
+  if (!boardEl) return;
+  let dropLine = document.querySelector('.drop-line');
+  if (!dropLine) {
+    dropLine = document.createElement('div');
+    dropLine.className = 'drop-line vertical';
+  }
+  const lists = [...boardEl.querySelectorAll('.list')].filter((l) => l !== sourceEl);
+  const next = lists.find((l) => {
+    const box = l.getBoundingClientRect();
+    return clientX < box.left + box.width / 2;
+  });
+  if (next) {
+    boardEl.insertBefore(dropLine, next);
+  } else {
+    boardEl.insertBefore(dropLine, boardEl.querySelector('.list-add'));
+  }
+}
+
 /**
  * Rend un élément draggable avec animations et indicateur d'insertion.
  * opts:
@@ -81,6 +104,7 @@ export function beginDrag(el, opts, ev) {
   const endDrag = (e, cancelled) => {
     cleanup();
     if (!moved) return; // simple clic
+    lastDragEnd = Date.now();
     ghost?.remove();
     el.classList.remove('dragging');
     active = null;
@@ -121,6 +145,8 @@ export function beginDrag(el, opts, ev) {
 
     if (opts.kind === 'card') {
       updateDropIndicator(found, e.clientY, el);
+    } else if (opts.kind === 'list') {
+      updateListDropIndicator(found, e.clientX, el);
     }
   };
   // Coalesce les pointermove (peuvent dépasser 120 Hz) en un traitement par frame.
@@ -148,6 +174,14 @@ let lastY = 0;
 window.addEventListener('pointermove', (e) => { lastY = e.clientY; });
 export function lastPointerY() {
   return lastY;
+}
+
+// Horodatage du dernier drag RÉELLEMENT déplacé — les handlers `click` qui
+// suivent un pointerup (navigation board, renommage de liste) s'en servent
+// pour ignorer le clic résiduel d'un drag qui vient de se terminer.
+let lastDragEnd = 0;
+export function recentlyDragged(ms = 250) {
+  return Date.now() - lastDragEnd < ms;
 }
 
 export function activeDrag() {

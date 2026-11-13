@@ -6,7 +6,7 @@ import { state, loadBoards } from '../state.js';
 import { boardUrl, navigate } from '../router.js';
 import { on } from '../ws.js';
 import { toast, promptDialog, openModal, confirmDialog } from '../ui/modal.js';
-import { draggable } from '../dnd.js';
+import { draggable, recentlyDragged } from '../dnd.js';
 import { icon } from '../icons.js';
 
 export function renderSidebar(host) {
@@ -153,6 +153,7 @@ export function renderSidebar(host) {
 
   boardList.querySelectorAll('[data-board]').forEach((b) => {
     b.onclick = () => {
+      if (recentlyDragged()) return; // clic résiduel de fin de drag
       navigate(boardUrl(b.dataset.board, 'board'));
     };
   });

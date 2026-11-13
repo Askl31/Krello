@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { escapeHtml, PRIORITY_META } from '../format.js';
 import { state, cardsOfList, visibleLists, refreshBoard } from '../state.js';
-import { draggable, activeDrag, beginDrag, lastPointerY } from '../dnd.js';
+import { draggable, activeDrag, beginDrag, lastPointerY, recentlyDragged } from '../dnd.js';
 import { toast, promptDialog, confirmDialog, openModal } from '../ui/modal.js';
 import { cardTileHtml, updateCardTileInDOM } from '../components/card_tile.js';
 import { openCardModal } from '../components/card_modal.js';
@@ -301,6 +301,7 @@ function listEl(list) {
 
   el.innerHTML = `
     <div class="list-head">
+      <span class="list-drag-handle" title="Glisser pour déplacer la liste">${icon('drag', { size: 12 })}</span>
       <span class="list-status-dot"></span>
       <h3 data-edit-list="${list.id}" title="Cliquez pour renommer">${escapeHtml(list.title)}</h3>
       <span class="count ${over ? 'wip-warn' : ''}" title="${list.wip_limit ? `Limite WIP: ${list.wip_limit}` : ''}">
@@ -333,8 +334,9 @@ function listEl(list) {
   // galerie de modèles
   el.querySelector('[data-add-from-template]')?.addEventListener('click', () => openTemplateGallery(list.id));
 
-  // édition titre + menu
+  // édition titre + menu (le clic résiduel d'un drag qui vient de finir est ignoré)
   el.querySelector('[data-edit-list]').addEventListener('click', async () => {
+    if (recentlyDragged()) return;
     const nv = await promptDialog('Renommer la liste', list.title);
     if (nv && nv !== list.title) { await api.updateList(list.id, { title: nv }); reload(); }
   });
@@ -342,20 +344,33 @@ function listEl(list) {
     showListMenu(e.currentTarget, list);
   });
 
-  // drag de la liste (poignée = en-tête)
+  // drag de la liste : saisissable partout SAUF les éléments interactifs et les
+  // tuiles de cartes (qui ont leur propre DnD délégué) — poignée ⠿ en en-tête.
   draggable(el, {
     kind: 'list',
     id: list.id,
-    canDrag: (ev) => !!ev.target.closest('.list-head h3, .list-head') && !ev.target.closest('button'),
-    targetSelector: '.board .list',
-    onDrop: async ({ targetEl }) => {
-      const targetId = targetEl.dataset.list;
-      if (!targetId || targetId === list.id) return;
+    canDrag: (ev) =>
+      !ev.target.closest('button, input, textarea, a, .card-tile, .sb-board-actions'),
+    targetSelector: '.board .list, .board .list-add',
+    onDrop: async ({ targetEl, x }) => {
       const boardEl = document.querySelector('#board');
       const moving = boardEl.querySelector(`.list[data-list="${list.id}"]`);
-      boardEl.insertBefore(moving, targetEl);
-      // calcule positions : ordre d'affichage
-      const ids = [...boardEl.querySelectorAll('.list')].map((n) => n.dataset.list);
+      if (!moving) return;
+      // Ordre cible : listes actives du DOM (soi exclu), insertion avant/après
+      // la cible selon la moitié survolée ; dépôt sur « Ajouter une liste » ou
+      // hors cible → à la fin.
+      const others = [...boardEl.querySelectorAll('.list')].filter((n) => n !== moving);
+      let insertIdx = others.length;
+      if (targetEl && targetEl.classList.contains('list')) {
+        const idx = others.indexOf(targetEl);
+        const box = targetEl.getBoundingClientRect();
+        insertIdx = x > box.left + box.width / 2 ? idx + 1 : idx;
+      }
+      others.splice(insertIdx, 0, moving);
+      const addBtn = boardEl.querySelector('.list-add');
+      for (const n of others) boardEl.insertBefore(n, addBtn);
+      // positions : ordre d'affichage
+      const ids = others.map((n) => n.dataset.list);
       for (let i = 0; i < ids.length; i++) {
         const l = visibleLists().find((x) => x.id === ids[i]);
         if (l && l.position !== i) await api.updateList(l.id, { position: i });
