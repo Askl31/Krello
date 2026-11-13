@@ -350,27 +350,46 @@ function listEl(list) {
     kind: 'list',
     id: list.id,
     canDrag: (ev) =>
+      !list.archived &&
       !ev.target.closest('button, input, textarea, a, .card-tile, .sb-board-actions'),
     targetSelector: '.board .list, .board .list-add',
-    onDrop: async ({ targetEl, x }) => {
+    onDrop: async ({ x }) => {
       const boardEl = document.querySelector('#board');
+      if (!boardEl) return;
       const moving = boardEl.querySelector(`.list[data-list="${list.id}"]`);
       if (!moving) return;
-      // Ordre cible : listes actives du DOM (soi exclu), insertion avant/après
-      // la cible selon la moitié survolée ; dépôt sur « Ajouter une liste » ou
-      // hors cible → à la fin.
-      const others = [...boardEl.querySelectorAll('.list')].filter((n) => n !== moving);
+
+      const allActive = [...boardEl.querySelectorAll('.list')].filter((n) => {
+        const item = state.lists.find((l) => l.id === n.dataset.list);
+        return item && !item.archived;
+      });
+      const currentIdx = allActive.indexOf(moving);
+      if (currentIdx === -1) return;
+
+      const others = allActive.filter((n) => n !== moving);
+      if (!others.length) return;
+
+      // Détermine l'index d'insertion dans `others` par projection X
       let insertIdx = others.length;
-      if (targetEl && targetEl.classList.contains('list')) {
-        const idx = others.indexOf(targetEl);
-        const box = targetEl.getBoundingClientRect();
-        insertIdx = x > box.left + box.width / 2 ? idx + 1 : idx;
+      for (let i = 0; i < others.length; i++) {
+        const box = others[i].getBoundingClientRect();
+        const midX = box.left + box.width / 2;
+        if (x < midX) {
+          insertIdx = i;
+          break;
+        }
       }
+
+      // Si la colonne est déposée à son emplacement d'origine, rien à faire
+      if (insertIdx === currentIdx) {
+        return;
+      }
+
       others.splice(insertIdx, 0, moving);
       const addBtn = boardEl.querySelector('.list-add');
       for (const n of others) boardEl.insertBefore(n, addBtn);
-      // Un SEUL appel atomique : les PATCH individuels déclenchent une
-      // renormalisation par created_at qui restaurait l'ancien ordre.
+
+      // Un SEUL appel atomique avec exactement toutes les listes actives
       try {
         await api.reorderLists(state.board.id, others.map((n) => n.dataset.list));
       } catch (e) { toast(e.message, 'err'); }

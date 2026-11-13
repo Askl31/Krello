@@ -2,11 +2,13 @@
 
 let active = null; // { type, id, ghost }
 
-function makeGhost(el, x, y) {
+function makeGhost(el, x, y, grabOffset) {
   const ghost = el.cloneNode(true);
   ghost.classList.add('drag-ghost');
   ghost.style.width = `${el.offsetWidth}px`;
-  ghost.style.translate = `${x - 14}px ${y - 14}px`;
+  const ox = grabOffset ? grabOffset.x : 14;
+  const oy = grabOffset ? grabOffset.y : 14;
+  ghost.style.translate = `${x - ox}px ${y - oy}px`;
   document.body.appendChild(ghost);
   return ghost;
 }
@@ -40,17 +42,32 @@ function updateDropIndicator(targetEl, clientY, sourceEl) {
 }
 
 /// Indicateur de drop pour les listes : marque la colonne cible avec
-/// `drop-before`/`drop-after` (box-shadow inset → ZÉRO décalage de layout ;
-/// une drop-line insérée dans le flux flex décalait les colonnes pendant le
-/// drag et faisait rater le hit-test au drop).
-function updateListDropIndicator(targetEl, clientX, sourceEl) {
-  document.querySelectorAll('#board .list').forEach((l) => {
-    if (l !== targetEl) l.classList.remove('drop-before', 'drop-after');
-  });
-  if (!targetEl || !targetEl.classList.contains('list')) return;
-  const box = targetEl.getBoundingClientRect();
-  targetEl.classList.toggle('drop-after', clientX > box.left + box.width / 2);
-  targetEl.classList.toggle('drop-before', clientX <= box.left + box.width / 2);
+/// `drop-before`/`drop-after` (box-shadow inset → ZÉRO décalage de layout).
+/// Répartit l'espace continu horizontalement entre les colonnes restantes :
+/// zéro trou dans les gaps, zéro échec en dessous des colonnes courtes.
+function updateListDropIndicator(sourceEl, clientX) {
+  const boardEl = document.querySelector('#board');
+  if (!boardEl) return;
+  const allLists = [...boardEl.querySelectorAll('.list')];
+  allLists.forEach((l) => l.classList.remove('drop-before', 'drop-after'));
+  const others = allLists.filter((l) => l !== sourceEl);
+  if (!others.length) return;
+
+  let insertIdx = others.length;
+  for (let i = 0; i < others.length; i++) {
+    const box = others[i].getBoundingClientRect();
+    const midX = box.left + box.width / 2;
+    if (clientX < midX) {
+      insertIdx = i;
+      break;
+    }
+  }
+
+  if (insertIdx < others.length) {
+    others[insertIdx].classList.add('drop-before');
+  } else {
+    others[others.length - 1].classList.add('drop-after');
+  }
 }
 
 /**
@@ -76,15 +93,26 @@ export function draggable(el, opts) {
  */
 export function beginDrag(el, opts, ev) {
   const start = { x: ev.clientX, y: ev.clientY };
+  const elRect = el.getBoundingClientRect();
+  const grabOffset = {
+    x: ev.clientX - elRect.left,
+    y: ev.clientY - elRect.top,
+  };
   let moved = false;
   let ghost = null;
   let currentTarget = null;
   let raf = 0;
   let lastEvt = null;
 
+  const onSelectStart = (e) => e.preventDefault();
+  window.addEventListener('selectstart', onSelectStart, { capture: true });
+
   const cleanup = () => {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
+    document.body.classList.remove('is-dragging');
+    window.removeEventListener('selectstart', onSelectStart, { capture: true });
+    window.getSelection()?.removeAllRanges();
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
@@ -92,6 +120,8 @@ export function beginDrag(el, opts, ev) {
     document.querySelector('.drop-line')?.remove();
     document.querySelectorAll('#board .drop-before, #board .drop-after')
       .forEach((l) => l.classList.remove('drop-before', 'drop-after'));
+    document.querySelectorAll('.drop-over, .drag-over')
+      .forEach((l) => l.classList.remove('drop-over', 'drag-over'));
   };
 
   const endDrag = (e, cancelled) => {
@@ -112,19 +142,74 @@ export function beginDrag(el, opts, ev) {
     if (!moved && Math.hypot(e.clientX - start.x, e.clientY - start.y) < 5) return;
     if (!moved) {
       moved = true;
-      ghost = makeGhost(el, e.clientX, e.clientY);
+      document.body.classList.add('is-dragging');
+      window.getSelection()?.removeAllRanges();
+      ghost = makeGhost(el, e.clientX, e.clientY, grabOffset);
       el.classList.add('dragging');
       active = { type: opts.kind, id: opts.id };
     }
-    ghost.style.translate = `${e.clientX - 16}px ${e.clientY - 16}px`;
+    e.preventDefault?.();
+    window.getSelection()?.removeAllRanges();
+    const ox = grabOffset.x;
+    const oy = grabOffset.y;
+    ghost.style.translate = `${e.clientX - ox}px ${e.clientY - oy}px`;
 
-    const zones = document.querySelectorAll(opts.targetSelector);
+    // Défilement automatique horizontal si on s'approche des bords du scroller
+    const scroller = document.querySelector('.board-scroller');
+    if (scroller) {
+      const edgeMargin = 70;
+      const sr = scroller.getBoundingClientRect();
+      if (e.clientX > sr.right - edgeMargin) {
+        const intensity = Math.min(1, (e.clientX - (sr.right - edgeMargin)) / edgeMargin);
+        scroller.scrollLeft += Math.round(intensity * 18);
+      } else if (e.clientX < sr.left + edgeMargin) {
+        const intensity = Math.min(1, ((sr.left + edgeMargin) - e.clientX) / edgeMargin);
+        scroller.scrollLeft -= Math.round(intensity * 18);
+      }
+    }
+
     let found = null;
-    for (const z of zones) {
-      const r = z.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-        found = z;
-        break;
+    if (opts.kind === 'list') {
+      const boardEl = document.querySelector('#board');
+      if (boardEl) {
+        found = boardEl;
+        updateListDropIndicator(el, e.clientX);
+      }
+    } else if (opts.kind === 'card' && opts.targetSelector === '.list') {
+      // Pour les cartes dans le Kanban : projection continue sur les colonnes
+      const scrollerEl = document.querySelector('.board-scroller');
+      const lists = [...document.querySelectorAll('#board .list')];
+      if (lists.length) {
+        const topBound = lists[0].getBoundingClientRect().top - 30;
+        const bottomBound = scrollerEl ? scrollerEl.getBoundingClientRect().bottom + 40 : window.innerHeight;
+        if (e.clientY >= topBound && e.clientY <= bottomBound) {
+          let best = null;
+          let bestDist = Infinity;
+          for (const l of lists) {
+            const r = l.getBoundingClientRect();
+            let dist = 0;
+            if (e.clientX < r.left) dist = r.left - e.clientX;
+            else if (e.clientX > r.right) dist = e.clientX - r.right;
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = l;
+            }
+          }
+          found = best;
+        }
+      }
+      updateDropIndicator(found, e.clientY, el);
+    } else {
+      const zones = document.querySelectorAll(opts.targetSelector);
+      for (const z of zones) {
+        const r = z.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          found = z;
+          break;
+        }
+      }
+      if (opts.kind === 'card') {
+        updateDropIndicator(found, e.clientY, el);
       }
     }
 
@@ -132,19 +217,14 @@ export function beginDrag(el, opts, ev) {
       currentTarget.classList.remove('drop-over', 'drag-over');
     }
     currentTarget = found;
-    if (found) {
+    if (found && opts.kind !== 'list') {
       found.classList.add(opts.kind === 'card' ? 'drag-over' : 'drop-over');
-    }
-
-    if (opts.kind === 'card') {
-      updateDropIndicator(found, e.clientY, el);
-    } else if (opts.kind === 'list') {
-      updateListDropIndicator(found, e.clientX, el);
     }
   };
   // Coalesce les pointermove (peuvent dépasser 120 Hz) en un traitement par frame.
   const onMove = (e) => {
     lastEvt = e;
+    if (moved) e.preventDefault?.();
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
