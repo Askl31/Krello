@@ -126,8 +126,10 @@ export const api = {
   pickBackupDir: () => api.post('/api/v1/settings/backup/pick'),
   system: () => api.get('/api/v1/system'),
   deepLink: (url) => api.post('/api/v1/deep-link', { url }),
-  siriPack: (dir) => api.post('/api/v1/macos/siri-pack', { dir }),
-  pickSiriPackDir: () => api.post('/api/v1/macos/siri-pack/pick'),
+  quickAddStatus: () => api.get('/api/v1/macos/quick-add/status'),
+  quickAddInstall: () => api.post('/api/v1/macos/quick-add/install'),
+  quickAddUninstall: () => api.post('/api/v1/macos/quick-add/uninstall'),
+  quickAddTest: () => api.post('/api/v1/macos/quick-add/test'),
 
   search: (q, boardId) =>
     api.get(`/api/v1/search?q=${encodeURIComponent(q)}${boardId ? `&board_id=${boardId}` : ''}`),

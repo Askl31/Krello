@@ -38,10 +38,11 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
 - **Apple Intelligence** (macOS 15.1+, Apple Silicon) : carte/plan de projet en
   langage naturel, résumés, priorités suggérées, reformulation, checklists —
   100 % on-device. Documenté dans [`docs/APPLE_INTELLIGENCE.md`](docs/APPLE_INTELLIGENCE.md).
-- **Siri & Spotlight (macOS)** : ajout rapide d'une tâche dans une liste déterminée
-  depuis Spotlight (⌘Espace) ou Siri — pack de raccourcis `.shortcut` généré depuis
-  les Paramètres (un par liste), deep link `krello://` + CLI `krello task add` en
-  repli. Documenté dans [`docs/MACOS_SIRI_SPOTLIGHT.md`](docs/MACOS_SIRI_SPOTLIGHT.md).
+- **Spotlight Quick Add (macOS)** : ajout rapide d'une tâche dans n'importe quelle liste
+  depuis Spotlight (⌘Espace) sans jamais quitter l'application active. HUD flottant natif
+  (`Ajouter à Krello.app`, `LSUIElement = true`) installé en un clic depuis les Paramètres,
+  avec diffusion WebSocket temps réel et repli SQLite direct.
+  Documenté dans [`docs/MACOS_SIRI_SPOTLIGHT.md`](docs/MACOS_SIRI_SPOTLIGHT.md).
   Windows inchangé.
 
 ## Compilation & lancement
@@ -129,22 +130,23 @@ import/export/automations, IA, intégration HTTP, rappels, récurrence, tracking
 duplication de listes, garde Host, sauvegardes) : `cargo test --workspace`.
 
 ## Journal des modifications
-### v0.1.7 — Siri & Spotlight (macOS) : ajout rapide de tâches
+### v0.1.7 — Spotlight Quick Add (macOS) : ajout rapide de tâches sans quitter l'application active
 
-- **Raccourcis Siri/Spotlight générés par l'app** : Paramètres → onglet « macOS » →
-  choisir un dossier (sélecteur natif Finder dans l'app) → un fichier `.shortcut`
-  par liste + `LISEZMOI.txt`. Double-clic pour importer dans Raccourcis, puis
-  « Ajouter à Siri » ; les raccourcis sont aussi indexés par **Spotlight** (⌘Espace).
-- **Deep link `krello://task/new?list=…&title=…`** enregistré sur macOS uniquement
-  (`tauri-plugin-deep-link`, `tauri.macos.conf.json`, capability macOS) : l'app
-  crée la carte via `POST /api/v1/deep-link` (événement WS → UI live, annulable ⌘Z)
-  ou ouvre une modale pré-remplie si le titre manque (`needs_input`, `confirm=1`).
-  Le titre dicté passe par un fichier inbox `<data>/siri-inbox.txt` (lu puis supprimé).
+- **Utilitaire natif Spotlight (`Ajouter à Krello.app`)** : Paramètres → onglet « macOS » →
+  installation en 1 clic dans `~/Applications/` (compilation Swift `swiftc`, bundle `LSUIElement = true`,
+  icône officielle, signature ad-hoc et indexation instantanée Spotlight via `lsregister`).
+  Depuis n'importe où : `⌘Espace` → « krello » ou « ajouter » → `Entrée` → HUD flottant compact
+  AppKit (`NSPanel` translucide vibrant). Saisie de la tâche avec support de `@NomDeListe`,
+  `Échap` pour fermer, `Entrée` pour valider.
+- **Création instantanée multi-voies** : appel HTTP local (`POST /api/v1/deep-link`) pour mise à
+  jour WebSocket temps réel si Krello est ouvert, avec repli SQLite direct si Krello est fermé,
+  puis notification discrète macOS.
 - **CLI `task add`** (`krello` et binaire de l'app) :
   `task add --title "…" [--list "…"] [--board "…"] [--db PATH]` (`--title -` = stdin),
   écrit directement dans la SQLite (WAL) — repli du raccourci et usage Terminal.
 - Nouveaux endpoints : `GET /api/v1/system`, `POST /api/v1/deep-link`,
-  `POST /api/v1/macos/siri-pack` (+ `/pick`, 400 hors macOS / hors app native).
+  `GET /api/v1/macos/quick-add/status`, `POST /api/v1/macos/quick-add/install`,
+  `POST /api/v1/macos/quick-add/uninstall`, `POST /api/v1/macos/quick-add/test`.
 - **Windows inchangé** : plugin, config et capability enregistrés uniquement sur
   la cible macOS ; l'onglet macOS est masqué ailleurs.
 

@@ -66,6 +66,9 @@ fn build_shortcut_produces_valid_binary_plist_with_two_actions() {
     let p1 = a1.get("WFWorkflowActionParameters").unwrap().as_dictionary().unwrap();
     assert_eq!(p1.get("WFShellScriptShell").unwrap().as_string().unwrap(), "/bin/sh");
     assert_eq!(p1.get("WFInput").unwrap().as_string().unwrap(), "to stdin");
+    assert_eq!(p1.get("Shell").unwrap().as_string().unwrap(), "/bin/sh");
+    assert_eq!(p1.get("InputMode").unwrap().as_string().unwrap(), "to stdin");
+    assert_eq!(p1.get("Script").unwrap().as_string().unwrap(), &script);
     let src = p1.get("WFShellScript").unwrap().as_string().unwrap();
     assert!(src.contains("krello://task/new?list=Courses"));
     // UUIDs présents et distincts
@@ -98,11 +101,15 @@ fn write_pack_writes_one_shortcut_per_list_plus_readme() {
     assert!(names.contains(&"Krello · Travail · Courses.shortcut".to_string()));
     assert!(names.iter().any(|n| n.contains("À faire-A-B")));
     assert!(names.contains(&"LISEZMOI.txt".to_string()));
-    // chaque .shortcut est un plist binaire valide
+    // chaque .shortcut est un paquet signé (AEA1) sur macOS ou un plist binaire valide
     for f in files.iter().filter(|f| f.extension().map(|e| e == "shortcut").unwrap_or(false)) {
         let bytes = std::fs::read(f).unwrap();
-        let v = plist::Value::from_reader(Cursor::new(&bytes)).unwrap();
-        assert!(v.as_dictionary().unwrap().get("WFWorkflowActions").is_some());
+        if bytes.starts_with(b"AEA1") {
+            assert!(bytes.len() > 500);
+        } else {
+            let v = plist::Value::from_reader(Cursor::new(&bytes)).unwrap();
+            assert!(v.as_dictionary().unwrap().get("WFWorkflowActions").is_some());
+        }
     }
     let readme = std::fs::read_to_string(out.join("LISEZMOI.txt")).unwrap();
     assert!(readme.contains("Spotlight"));

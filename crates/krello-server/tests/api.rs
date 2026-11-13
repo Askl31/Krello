@@ -668,46 +668,55 @@ async fn deep_link_creates_card_and_needs_input() {
 }
 
 #[tokio::test]
-async fn siri_pack_writes_shortcut_files_on_macos() {
+async fn quick_add_status_endpoint_reports_status() {
     let app = test_krello_app();
-    let (status, board) = json_req(&app, "POST", "/api/v1/boards", Some(serde_json::json!({ "title": "Perso" }))).await;
-    assert_eq!(status, StatusCode::CREATED);
-    let board_id = board["id"].as_str().unwrap().to_string();
-    json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "Courses" }))).await;
-    json_req(&app, "POST", &format!("/api/v1/boards/{board_id}/lists"), Some(serde_json::json!({ "title": "À faire" }))).await;
-
-    let dir = std::env::temp_dir().join(format!("krello-siri-pack-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    let (status, body) = json_req(&app, "POST", "/api/v1/macos/siri-pack", Some(serde_json::json!({ "dir": dir.to_string_lossy() }))).await;
-    if cfg!(target_os = "macos") {
-        assert_eq!(status, StatusCode::OK, "body: {body}");
-        let files = body["files"].as_array().unwrap();
-        assert_eq!(files.len(), 3, "2 raccourcis + LISEZMOI: {body}");
-        let names: Vec<String> = files.iter().map(|f| f.as_str().unwrap().to_string()).collect();
-        assert!(names.iter().any(|n| n.ends_with("Krello · Courses.shortcut")));
-        assert!(names.iter().any(|n| n.ends_with("Krello · À faire.shortcut")));
-        assert!(names.iter().any(|n| n.ends_with("LISEZMOI.txt")));
-        // chaque .shortcut est un plist binaire valide avec les 2 actions
-        for f in &names {
-            if f.ends_with(".shortcut") {
-                let bytes = std::fs::read(f).unwrap();
-                let v = plist::Value::from_reader(std::io::Cursor::new(&bytes)).unwrap();
-                let actions = v.as_dictionary().unwrap().get("WFWorkflowActions").unwrap().as_array().unwrap();
-                assert_eq!(actions.len(), 2);
-            }
-        }
-    } else {
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(body["message"].as_str().unwrap().contains("macOS"));
-    }
-    let _ = std::fs::remove_dir_all(&dir);
+    let (status, body) = json_req(&app, "GET", "/api/v1/macos/quick-add/status", None).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["supported"], cfg!(target_os = "macos"));
+    assert_eq!(body["app_name"], "Ajouter à Krello.app");
 }
 
 #[tokio::test]
-async fn siri_pack_pick_rejected_outside_tauri_app() {
-    std::env::remove_var("KRELLO_NATIVE_DIALOG");
+async fn quick_add_test_endpoint_reports_status() {
     let app = test_krello_app();
-    let (status, body) = json_req(&app, "POST", "/api/v1/macos/siri-pack/pick", None).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body["message"].as_str().unwrap().contains("app Krello"));
+    let (status, _) = json_req(&app, "POST", "/api/v1/macos/quick-add/test", None).await;
+    if !cfg!(target_os = "macos") {
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    } else {
+        // Si l'applet n'est pas installée, renvoie 404
+        assert!(status == StatusCode::OK || status == StatusCode::NOT_FOUND);
+    }
+}
+
+#[tokio::test]
+async fn quick_add_install_and_uninstall_flow() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let app = test_krello_app();
+    // 1. Install
+    let (status, body) = json_req(&app, "POST", "/api/v1/macos/quick-add/install", None).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["installed"], true);
+    let app_path = std::path::PathBuf::from(body["path"].as_str().unwrap());
+    assert!(app_path.exists());
+    assert!(app_path.join("Contents/Info.plist").exists());
+    assert!(app_path.join("Contents/MacOS/Ajouter à Krello").exists());
+    assert!(app_path.join("Contents/Resources/AppIcon.icns").exists());
+
+    // 2. Status reports installed
+    let (status, body) = json_req(&app, "GET", "/api/v1/macos/quick-add/status", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["installed"], true);
+
+    // 3. Uninstall
+    let (status, body) = json_req(&app, "POST", "/api/v1/macos/quick-add/uninstall", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["installed"], false);
+    assert!(!app_path.exists());
+
+    // 4. Status reports uninstalled
+    let (status, body) = json_req(&app, "GET", "/api/v1/macos/quick-add/status", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["installed"], false);
 }

@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod error;
+pub mod quick_add;
 pub mod routes;
 pub mod state;
 pub mod ws;

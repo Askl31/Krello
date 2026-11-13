@@ -221,38 +221,71 @@ export function renderSettings() {
       <div class="settings-card">
         <div class="settings-card-head">
           <div>
-            <h3 class="settings-card-title">${icon('ai', { size: 18, className: 'muted' })} <span>Siri &amp; Spotlight — ajout rapide de tâches</span></h3>
+            <h3 class="settings-card-title">${icon('search', { size: 18, className: 'muted' })} <span>Spotlight — Ajout rapide de tâches</span></h3>
             <p class="settings-card-desc">
-              Générez des raccourcis macOS (un par liste) pour créer une tâche dans une liste déterminée
-              depuis <b>Spotlight</b> (⌘Espace → « Krello ») ou <b>Siri</b> (« Ajouter à Siri » dans l'app
-              Raccourcis, puis dictez la tâche), sans ouvrir Krello.
+              Ajoutez des cartes dans Krello depuis n'importe quelle application sans quitter votre écran actif.
+              L'application légère <b>Ajouter à Krello</b> s'intègre nativement à Spotlight : ouvrez Spotlight (⌘ + Espace), saisissez votre tâche et validez !
             </p>
           </div>
         </div>
-        <div class="field">
-          <label>Dossier de génération des raccourcis</label>
-          <div class="row" style="gap:8px">
-            <input class="input" id="st-siri-dir" placeholder="/Users/moi/Raccourcis-Krello" style="flex:1" />
-            <button class="btn ghost sm" id="st-siri-browse" style="flex:none;display:none">📁 Parcourir…</button>
-            <button class="btn primary sm" id="st-siri-gen" style="flex:none">${icon('check', { size: 13 })} <span>Générer les raccourcis</span></button>
+
+        <div id="st-quick-add-box" style="margin-top:12px;padding:16px;background:var(--surface-2);border-radius:var(--radius-sm);border:1px solid var(--border)">
+          <div class="row" style="gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+            <div id="st-quick-add-status-wrapper" style="display:flex;align-items:center;gap:10px">
+              <span class="muted" style="font-size:13px">Vérification du statut…</span>
+            </div>
+            <div id="st-quick-add-actions" style="display:flex;gap:8px;align-items:center">
+              <!-- Actions dynamiques -->
+            </div>
           </div>
-          <p class="muted" style="font-size:12px;margin-top:6px">
-            Écrit un fichier <code>.shortcut</code> par liste + <code>LISEZMOI.txt</code> dans ce dossier.
-            Importez chaque fichier par double-clic (« Ajouter le raccourci »), puis dans l'app Raccourcis :
-            « Ajouter à Siri » avec la phrase de votre choix. Les raccourcis apparaissent aussi dans Spotlight.
-          </p>
         </div>
-        <div id="st-siri-status" style="margin-top:12px"><span class="muted">…</span></div>
       </div>
 
       <div class="settings-card">
         <div class="settings-card-head">
           <div>
-            <h3 class="settings-card-title">${icon('settings', { size: 18, className: 'muted' })} <span>Ligne de commande (repli / scripts)</span></h3>
-            <p class="settings-card-desc">Binaire courant : <code id="st-siri-exe" class="muted"></code></p>
+            <h3 class="settings-card-title">${icon('kanban', { size: 18, className: 'muted' })} <span>Comment ça marche ?</span></h3>
+            <p class="settings-card-desc">Le flux d'ajout rapide Spotlight est conçu pour zéro friction et aucune distraction.</p>
           </div>
         </div>
-        <div id="st-siri-lists" style="display:flex;flex-direction:column;gap:6px"><span class="muted">Chargement…</span></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin-top:8px">
+          <div style="background:var(--surface-2);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-weight:700">1</span>
+              <b style="font-size:13px">⌘ + Espace</b>
+            </div>
+            <p class="muted" style="font-size:12px;margin:0;line-height:1.4">Ouvrez Spotlight par-dessus n'importe quel logiciel ou document en cours.</p>
+          </div>
+
+          <div style="background:var(--surface-2);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-weight:700">2</span>
+              <b style="font-size:13px">« krello » puis Entrée</b>
+            </div>
+            <p class="muted" style="font-size:12px;margin:0;line-height:1.4">Spotlight sélectionne instantanément l'utilitaire <b>Ajouter à Krello</b>.</p>
+          </div>
+
+          <div style="background:var(--surface-2);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-weight:700">3</span>
+              <b style="font-size:13px">HUD flottant discret</b>
+            </div>
+            <p class="muted" style="font-size:12px;margin:0;line-height:1.4">Une fenêtre compacte apparaît sans basculer d'application. Saisissez votre titre.</p>
+          </div>
+
+          <div style="background:var(--surface-2);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge" style="background:var(--accent-subtle);color:var(--accent);font-weight:700">4</span>
+              <b style="font-size:13px">Entrée = Validé</b>
+            </div>
+            <p class="muted" style="font-size:12px;margin:0;line-height:1.4">La carte est créée immédiatement et une notification confirme l'enregistrement.</p>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;padding:12px 14px;background:var(--surface-3);border-radius:var(--radius-xs);font-size:12.5px;line-height:1.45;color:var(--fg-muted)">
+          <b style="color:var(--fg)">💡 Astuce syntaxe rapide :</b> Vous pouvez spécifier la liste cible directement dans votre saisie avec <code>@NomListe</code> (ex. : <code>Appeler le client @Urgent</code>). La tâche sera automatiquement rangée dans la bonne liste sans toucher à la souris.
+        </div>
       </div>`;
   }
 
@@ -514,72 +547,103 @@ export function renderSettings() {
   }
 
   // =========================================================================
-  // Onglet macOS : raccourcis Siri/Spotlight + commandes CLI par liste
+  // Onglet macOS : Ajout rapide Spotlight (HUD natif)
   // =========================================================================
   if (isMac) {
-    const stSiriDir = host.querySelector('#st-siri-dir');
-    const stSiriBrowse = host.querySelector('#st-siri-browse');
-    const stSiriGen = host.querySelector('#st-siri-gen');
-    const stSiriStatus = host.querySelector('#st-siri-status');
-    const stSiriLists = host.querySelector('#st-siri-lists');
-    const stSiriExe = host.querySelector('#st-siri-exe');
-    if (stSiriDir) {
-      if (stSiriBrowse && inNativeApp) {
-        stSiriBrowse.style.display = '';
-        stSiriBrowse.addEventListener('click', async () => {
-          try {
-            const r = await api.pickSiriPackDir();
-            if (r.dir) stSiriDir.value = r.dir;
-          } catch (e) { toast(e.message, 'err'); }
-        });
-      }
-      if (stSiriExe) stSiriExe.textContent = state.system?.exe || '';
-      stSiriGen?.addEventListener('click', async () => {
-        const dir = (stSiriDir.value || '').trim();
-        if (!dir) { toast('Indiquez d’abord le dossier de génération', 'err'); return; }
-        try {
-          stSiriStatus.innerHTML = '<span class="muted">Génération…</span>';
-          const r = await api.siriPack(dir);
-          stSiriStatus.innerHTML = `<span class="badge done">● ${r.files.length} fichier(s) écrit(s) dans ${escapeHtml(r.dir)}</span>
-            <ul style="margin:6px 0 0 18px">${r.files.map((f) => `<li class="muted" style="font-size:12px">${escapeHtml(f)}</li>`).join('')}</ul>`;
-          toast(`${r.files.length} fichiers générés — importez-les par double-clic`, 'ok');
-        } catch (e) {
-          stSiriStatus.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
-          toast(e.message, 'err');
-        }
-      });
-    }
-    if (stSiriLists) {
-      (async () => {
-        try {
-          const exe = state.system?.exe || 'krello';
-          const boards = await api.boards();
-          const rows = [];
-          for (const b of boards) {
-            const lists = await api.lists(b.id);
-            for (const l of lists) {
-              const cmd = `"${exe}" task add --title "…" --list ${JSON.stringify(l.title)}`;
-              rows.push(`<div class="row" style="gap:8px;align-items:center;padding:4px 6px">
-                <span class="muted" style="font-size:11.5px;flex:none">${escapeHtml(b.title)}</span>
-                <b style="font-size:13px;flex:none">${escapeHtml(l.title)}</b>
-                <code class="muted" style="flex:1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(cmd)}">${escapeHtml(cmd)}</code>
-                <button class="btn ghost sm" data-copy="${escapeHtml(cmd)}" style="flex:none" title="Copier la commande">${icon('copy', { size: 13 })}</button>
-              </div>`);
+    const statusWrapper = host.querySelector('#st-quick-add-status-wrapper');
+    const actionsWrapper = host.querySelector('#st-quick-add-actions');
+
+    async function refreshQuickAddStatus() {
+      if (!statusWrapper || !actionsWrapper) return;
+      try {
+        statusWrapper.innerHTML = '<span class="muted" style="font-size:13px">Vérification du statut…</span>';
+        const st = await api.quickAddStatus();
+        if (st.installed) {
+          statusWrapper.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="badge done">● Installé dans Spotlight</span>
+              <code class="muted" style="font-size:12px">${escapeHtml(st.path || '~/Applications/Ajouter à Krello.app')}</code>
+            </div>`;
+          actionsWrapper.innerHTML = `
+            <button class="btn primary sm" id="st-qa-test" title="Ouvrir la fenêtre d'ajout rapide">
+              ${icon('search', { size: 13 })} <span>Tester l'ouverture</span>
+            </button>
+            <button class="btn secondary sm" id="st-qa-reinstall" title="Recompiler et réinstaller l'applet">
+              ${icon('undo', { size: 12 })} <span>Réinstaller</span>
+            </button>
+            <button class="btn ghost sm" id="st-qa-uninstall" title="Supprimer l'application Spotlight">
+              ${icon('trash', { size: 13 })}
+            </button>`;
+
+          host.querySelector('#st-qa-test')?.addEventListener('click', async () => {
+            try {
+              await api.quickAddTest();
+              toast('Fenêtre d’ajout rapide ouverte au premier plan !', 'ok');
+            } catch (e) {
+              toast(e.message, 'err');
             }
-          }
-          stSiriLists.innerHTML = rows.length ? rows.join('') : '<span class="muted">Aucune liste active — créez-en une dans un tableau.</span>';
-          stSiriLists.querySelectorAll('[data-copy]').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-              try {
-                await navigator.clipboard.writeText(btn.dataset.copy);
-                toast('Commande copiée dans le presse-papiers', 'ok');
-              } catch { toast('Copie impossible (presse-papiers indisponible)', 'err'); }
-            });
           });
-        } catch (e) {
-          stSiriLists.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+
+          host.querySelector('#st-qa-reinstall')?.addEventListener('click', async () => {
+            const btn = host.querySelector('#st-qa-reinstall');
+            if (btn) btn.disabled = true;
+            try {
+              toast('Compilation et installation en cours…', 'ok');
+              await api.quickAddInstall();
+              toast('Ajouter à Krello.app réinstallé avec succès !', 'ok');
+              await refreshQuickAddStatus();
+            } catch (e) {
+              toast(e.message, 'err');
+              if (btn) btn.disabled = false;
+            }
+          });
+
+          host.querySelector('#st-qa-uninstall')?.addEventListener('click', async () => {
+            if (!confirm('Voulez-vous supprimer l’utilitaire « Ajouter à Krello » de votre dossier Applications ?')) return;
+            try {
+              await api.quickAddUninstall();
+              toast('Application désinstallée', 'ok');
+              await refreshQuickAddStatus();
+            } catch (e) {
+              toast(e.message, 'err');
+            }
+          });
+        } else {
+          statusWrapper.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="badge" style="background:var(--surface-3);color:var(--muted)">○ Non installé</span>
+              <span class="muted" style="font-size:12.5px">L'application n'est pas encore présente dans ~/Applications</span>
+            </div>`;
+          actionsWrapper.innerHTML = `
+            <button class="btn primary sm" id="st-qa-install">
+              ${icon('plus', { size: 13 })} <span>Installer dans Spotlight</span>
+            </button>`;
+
+          host.querySelector('#st-qa-install')?.addEventListener('click', async () => {
+            const btn = host.querySelector('#st-qa-install');
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = 'Installation en cours…';
+            }
+            try {
+              toast('Compilation de l’application native en cours…', 'ok');
+              await api.quickAddInstall();
+              toast('« Ajouter à Krello » installé avec succès dans Spotlight !', 'ok');
+              await refreshQuickAddStatus();
+            } catch (e) {
+              toast(e.message, 'err');
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Installer dans Spotlight';
+              }
+            }
+          });
         }
-      })();
+      } catch (e) {
+        statusWrapper.innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+      }
     }
+
+    refreshQuickAddStatus();
   }
 }

@@ -100,6 +100,11 @@ pub fn build_task_shortcut(name: &str, list_title: &str, script: &str) -> Result
         "WFTextActionText".into(),
         Value::String("Run Shell Script".into()),
     );
+    // Paramètres modernes Apple Shortcuts (macOS 12+)
+    shell.insert("Script".into(), Value::String(script.to_string()));
+    shell.insert("Shell".into(), Value::String("/bin/sh".into()));
+    shell.insert("InputMode".into(), Value::String("to stdin".into()));
+    // Clés historiques (rétro-compatibilité)
     shell.insert("WFShellScript".into(), Value::String(script.to_string()));
     shell.insert(
         "WFShellScriptShell".into(),
@@ -196,8 +201,63 @@ fn lisezmoi(targets: &[ShortcutTarget]) -> String {
     )
 }
 
+/// Signe un fichier .shortcut sur macOS en utilisant `shortcuts sign --mode anyone`.
+/// Remplace le fichier plist brut par l'archive signée reconnue par macOS.
+pub fn sign_shortcut_file(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let tmp_signed = path.with_extension("signed.tmp");
+        if let Ok(status) = std::process::Command::new("shortcuts")
+            .arg("sign")
+            .arg("--mode")
+            .arg("anyone")
+            .arg("--input")
+            .arg(path)
+            .arg("--output")
+            .arg(&tmp_signed)
+            .status()
+        {
+            if status.success() && tmp_signed.exists() {
+                let _ = std::fs::rename(&tmp_signed, path);
+            } else {
+                let _ = std::fs::remove_file(&tmp_signed);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Ouvre un fichier ou un dossier avec l'utilitaire système macOS `open`.
+pub fn open_path(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()?;
+    }
+    Ok(())
+}
+
+/// Génère et signe un raccourci individuel pour une cible donnée.
+pub fn write_single_shortcut(
+    dir: &Path,
+    target: &ShortcutTarget,
+    exe: &Path,
+    data_dir: &Path,
+    db_path: &Path,
+) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let base = sanitize_filename(&format!("Krello · {}", target.list_title));
+    let path = dir.join(format!("{base}.shortcut"));
+    let script = task_add_script(&target.list_title, exe, data_dir, db_path);
+    let bytes = build_task_shortcut(&format!("Krello · {}", target.list_title), &target.list_title, &script)?;
+    std::fs::write(&path, bytes)?;
+    let _ = sign_shortcut_file(&path);
+    Ok(path)
+}
+
 /// Écrit le pack de raccourcis dans `dir` : un `.shortcut` par liste + LISEZMOI.txt.
-/// Retourne la liste des fichiers écrits.
+/// Retourne la liste des fichiers écrits (les .shortcut sont signés pour macOS).
 pub fn write_pack(
     dir: &Path,
     targets: &[ShortcutTarget],
@@ -222,6 +282,7 @@ pub fn write_pack(
         let script = task_add_script(&t.list_title, exe, data_dir, db_path);
         let bytes = build_task_shortcut(&format!("Krello · {}", t.list_title), &t.list_title, &script)?;
         std::fs::write(&path, bytes)?;
+        let _ = sign_shortcut_file(&path);
         written.push(path);
     }
     let readme = dir.join("LISEZMOI.txt");
