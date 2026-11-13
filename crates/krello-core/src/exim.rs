@@ -994,6 +994,10 @@ fn create_board_shell(
     deadline: Option<String>,
 ) -> Result<Board> {
     let now = crate::time::now_rfc3339();
+    let position = {
+        let db = service.lock_db()?;
+        db.conn.query_row("SELECT COALESCE(MAX(position), -1.0) + 1.0 FROM boards", [], |r| r.get(0))?
+    };
     let board = Board {
         id: crate::ids::new_id("board"),
         title: title.trim().to_string(),
@@ -1008,6 +1012,7 @@ fn create_board_shell(
         pinned_at: None,
         is_board_template: false,
         template_description: None,
+        position,
         created_at: now.clone(),
         updated_at: now,
     };

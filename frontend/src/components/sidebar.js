@@ -6,6 +6,7 @@ import { state, loadBoards } from '../state.js';
 import { boardUrl, navigate } from '../router.js';
 import { on } from '../ws.js';
 import { toast, promptDialog, openModal, confirmDialog } from '../ui/modal.js';
+import { draggable } from '../dnd.js';
 import { icon } from '../icons.js';
 
 export function renderSidebar(host) {
@@ -154,6 +155,39 @@ export function renderSidebar(host) {
     b.onclick = () => {
       navigate(boardUrl(b.dataset.board, 'board'));
     };
+  });
+  // Réordonnancement manuel des boards (drag & drop) — dans le groupe pinned
+  // de départ (épinglés et non épinglés ne se mélangent pas).
+  boardList.querySelectorAll('.sb-board-row').forEach((row) => {
+    draggable(row, {
+      kind: 'board',
+      id: row.dataset.boardRow,
+      canDrag: (ev) => !!ev.target.closest('.item') && !ev.target.closest('.sb-board-actions'),
+      targetSelector: '.sb-board-row',
+      onDrop: async ({ targetEl, y }) => {
+        const draggedId = row.dataset.boardRow;
+        const targetId = targetEl?.dataset.boardRow;
+        if (!targetId || targetId === draggedId) return;
+        const dragged = state.boards.find((x) => x.id === draggedId);
+        const target = state.boards.find((x) => x.id === targetId);
+        if (!dragged || !target || dragged.pinned !== target.pinned) return;
+        const groupIds = [...boardList.querySelectorAll('.sb-board-row')]
+          .map((r) => r.dataset.boardRow)
+          .filter((id) => (state.boards.find((x) => x.id === id)?.pinned ? 1 : 0) === (dragged.pinned ? 1 : 0));
+        const ordered = groupIds.filter((id) => id !== draggedId);
+        const idx = ordered.indexOf(targetId);
+        const box = targetEl.getBoundingClientRect();
+        ordered.splice(y < box.top + box.height / 2 ? idx : idx + 1, 0, draggedId);
+        try {
+          await Promise.all(ordered.map((id, i) => {
+            const b = state.boards.find((x) => x.id === id);
+            return b && b.position !== i ? api.updateBoard(id, { position: i }) : null;
+          }));
+          await loadBoards();
+          renderSidebar(host);
+        } catch (err) { toast(err.message, 'err'); }
+      },
+    });
   });
   boardList.querySelectorAll('[data-pin-board]').forEach((btn) => {
     btn.onclick = async (e) => {

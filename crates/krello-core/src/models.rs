@@ -34,6 +34,10 @@ pub struct Board {
     /// Optional helper text shown in the template gallery.
     #[serde(default)]
     pub template_description: Option<String>,
+    /// Manual ordering position within its pinned group (drag & drop in the
+    /// sidebar). Display order: pinned first, then `position`, then created_at.
+    #[serde(default)]
+    pub position: f64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -337,6 +341,7 @@ pub struct UpdateBoard {
     pub settings: Option<String>,
     pub archived: Option<bool>,
     pub pinned: Option<bool>,
+    pub position: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

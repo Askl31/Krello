@@ -348,6 +348,7 @@ pub fn row_board(r: &rusqlite::Row<'_>) -> rusqlite::Result<Board> {
         pinned_at: r.get("pinned_at")?,
         is_board_template: r.get::<_, i64>("is_board_template")? != 0,
         template_description: r.get("template_description")?,
+        position: r.get("position")?,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
     })
@@ -568,12 +569,12 @@ pub fn row_automation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
 
 pub fn insert_board_row(conn: &Connection, b: &Board) -> Result<()> {
     conn.execute(
-        "INSERT INTO boards(id,title,description,background,calendar_id,start_date,deadline,settings,archived,pinned,pinned_at,is_board_template,template_description,created_at,updated_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        "INSERT INTO boards(id,title,description,background,calendar_id,start_date,deadline,settings,archived,pinned,pinned_at,is_board_template,template_description,position,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             b.id, b.title, b.description, b.background, b.calendar_id, b.start_date, b.deadline,
             b.settings, b.archived as i64, b.pinned as i64, b.pinned_at,
-            b.is_board_template as i64, b.template_description, b.created_at, b.updated_at
+            b.is_board_template as i64, b.template_description, b.position, b.created_at, b.updated_at
         ],
     )?;
     Ok(())
@@ -583,11 +584,11 @@ pub fn update_board_row(conn: &Connection, b: &Board) -> Result<()> {
     conn.execute(
         "UPDATE boards SET title=?2, description=?3, background=?4, calendar_id=?5, start_date=?6,
          deadline=?7, settings=?8, archived=?9, pinned=?10, pinned_at=?11, is_board_template=?12,
-         template_description=?13, updated_at=?14 WHERE id=?1",
+         template_description=?13, position=?14, updated_at=?15 WHERE id=?1",
         params![
             b.id, b.title, b.description, b.background, b.calendar_id, b.start_date, b.deadline,
             b.settings, b.archived as i64, b.pinned as i64, b.pinned_at,
-            b.is_board_template as i64, b.template_description, b.updated_at
+            b.is_board_template as i64, b.template_description, b.position, b.updated_at
         ],
     )?;
     Ok(())

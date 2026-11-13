@@ -25,7 +25,10 @@ backend Rust, app native macOS & Windows, Apple Intelligence on-device.
   `card_id`, libellés FR, détail du payload).
 - **Boards** : **favoris épinglés** (📌, tri en tête de la sidebar), **modèles de
   board** (« Enregistrer comme modèle » → galerie « Nouveau board » → instanciation
-  copie profonde en une opération undoable).
+  copie profonde en une opération undoable), **ordre manuel** : drag & drop des
+  boards dans la menu de gauche (les épinglés et non épinglés ne se mélangent pas).
+- **Listes** : réordonnancement par drag & drop dans le Kanban **et** menu liste
+  « Déplacer à gauche / à droite » (swap du voisin, bords no-op, undoable).
 - **Vue d'ensemble** (accueil) : stats cross-board — tableaux, cartes actives,
   retards, à venir 7 j, terminées 7 j — rollup par tableau et activité récente.
 - **Gantt / Timeline (MS Project)** : durées en jours ouvrés, charge, % accompli,
@@ -142,6 +145,17 @@ récurrence, tracking, duplication (listes + **arbres de sous-cartes** + **modè
 garde Host, sauvegardes, **stats globales**) : `cargo test --workspace`.
 
 ## Journal des modifications
+### v0.2.1 — réordonnancement manuel : boards (sidebar) et listes (Kanban)
+
+- **Ordre manuel des boards** (migration 013) : `boards.position` (backfill par
+  ordre d'apparition) ; **drag & drop dans la menu de gauche** — les épinglés et
+  non épinglés forment deux groupes qui ne se mélangent pas ; tri
+  `pinned DESC, position, created_at` ; `PATCH /boards/{id} {position}`.
+- **Déplacement des listes** : drag & drop Kanban (existant) complété par le menu
+  liste « Déplacer à gauche / à droite » → `POST /lists/{id}/move {direction:-1|1}`
+  (swap du voisin actif immédiat, bords = no-op, archivées exclues, undoable).
+- Schéma v13 ; 149 tests workspace verts.
+
 ### v0.2.0 — P0+P1 : favoris, rappels multiples, recherche commentaires, modèles de board, sous-cartes, vue d'ensemble
 
 - **Favoris** : épingler un board (📌 dans la sidebar, `PATCH /boards/{id} {pinned}`) —

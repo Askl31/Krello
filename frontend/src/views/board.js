@@ -584,6 +584,8 @@ function showListMenu(anchor, list) {
   menu.style.top = `${r.bottom + 6}px`;
   menu.style.left = `${Math.min(window.innerWidth - 215, Math.max(8, r.left - 160))}px`;
   menu.innerHTML = `
+    <button data-act="left">${icon('chevronLeft', { size: 14 })} <span>Déplacer à gauche</span></button>
+    <button data-act="right">${icon('chevronRight', { size: 14 })} <span>Déplacer à droite</span></button>
     <button data-act="duplicate">${icon('copy', { size: 14 })} <span>Duplier la liste</span></button>
     <button data-act="wip">${icon('settings', { size: 14 })} <span>Limite WIP…</span></button>
     <button data-act="archive">${icon('boards', { size: 14 })} <span>${list.archived ? 'Désarchiver' : 'Archiver la liste'}</span></button>
@@ -598,7 +600,12 @@ function showListMenu(anchor, list) {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
     close();
-    if (act === 'duplicate') {
+    if (act === 'left' || act === 'right') {
+      try {
+        await api.moveList(list.id, act === 'left' ? -1 : 1);
+        reload();
+      } catch (e) { toast(e.message, 'err'); }
+    } else if (act === 'duplicate') {
       try {
         const nl = await api.duplicateList(list.id);
         toast(`Liste dupliée : « ${nl.title} »`, 'ok');

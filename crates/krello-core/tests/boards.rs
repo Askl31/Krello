@@ -130,9 +130,9 @@ fn board_templates_gallery_lifecycle() {
 #[test]
 fn global_stats_counts_across_boards() {
     let s = test_service();
-    let (b1, l1) = board_with_list(&s);
-    let b2 = s.create_board(CreateBoard { title: "Second".into(), ..Default::default() }).unwrap();
-    let l2 = s.create_list(&b2.id, CreateList { title: "L2".into(), ..Default::default() }).unwrap();
+    let (_b1, l1) = board_with_list(&s);
+    let b2 = s.create_board(CreateBoard { title: "Second".into(), ..Default::default() }).unwrap().id;
+    let l2 = s.create_list(&b2, CreateList { title: "L2".into(), ..Default::default() }).unwrap().id;
 
     let today = krello_core::time::today();
     let yesterday = krello_core::time::add_days(today, -1).to_string();
@@ -145,9 +145,9 @@ fn global_stats_counts_across_boards() {
     s.update_card(&soon.id, UpdateCard { due: Some(plus3), ..Default::default() }).unwrap();
     let far = make_card(&s, &l1, "lointaine");
     s.update_card(&far.id, UpdateCard { due: Some(in8), ..Default::default() }).unwrap();
-    let done = make_card(&s, &l2.id, "terminée");
+    let done = make_card(&s, &l2, "terminée");
     s.update_card(&done.id, UpdateCard { due_complete: Some(true), ..Default::default() }).unwrap();
-    make_card(&s, &l2.id, "sans date");
+    make_card(&s, &l2, "sans date");
     s.add_comment(&done.id, "fait aujourd'hui").unwrap();
 
     let st = s.global_stats().unwrap();
@@ -222,6 +222,43 @@ fn global_stats_urgent_and_due_soon_lists() {
     let due_titles: Vec<&str> = due_soon.iter().map(|c| c["title"].as_str().unwrap()).collect();
     assert_eq!(due_titles, vec!["échéance aujourd'hui", "échéance demain", "échéance +2"]);
     assert_eq!(st["due_soon_total"], 3);
+}
+
+#[test]
+fn boards_manual_position_ordering_and_undo() {
+    let s = test_service();
+    let b1 = s.create_board(CreateBoard { title: "Un".into(), ..Default::default() }).unwrap().id;
+    let b2 = s.create_board(CreateBoard { title: "Deux".into(), ..Default::default() }).unwrap().id;
+    let b3 = s.create_board(CreateBoard { title: "Trois".into(), ..Default::default() }).unwrap().id;
+    // positions d'apparition 0,1,2
+    let pos = |id: &str| s.get_board(id).unwrap().position;
+    assert_eq!((pos(&b1), pos(&b2), pos(&b3)), (0.0, 1.0, 2.0));
+
+    // Réordonner manuellement : Trois, Un, Deux
+    s.update_board(&b3, UpdateBoard { position: Some(-0.5), ..Default::default() }).unwrap();
+    let boards = s.list_boards(false).unwrap();
+    let order: Vec<&str> = boards.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(order, vec!["Trois", "Un", "Deux"]);
+
+    // Pin de Deux : groupe épinglé en tête, ordre interne par position.
+    s.update_board(&b2, UpdateBoard { pinned: Some(true), ..Default::default() }).unwrap();
+    let boards = s.list_boards(false).unwrap();
+    let order: Vec<&str> = boards.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(order, vec!["Deux", "Trois", "Un"]);
+
+    // Undo #1 : dépile le PIN de Deux (dernière opération) → plus d'épinglé.
+    s.undo().unwrap();
+    assert!(!s.get_board(&b2).unwrap().pinned);
+    let boards = s.list_boards(false).unwrap();
+    let order: Vec<&str> = boards.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(order, vec!["Trois", "Un", "Deux"]);
+
+    // Undo #2 : dépile le repositionnement de Trois → position 2.0 restaurée.
+    s.undo().unwrap();
+    let boards = s.list_boards(false).unwrap();
+    let order: Vec<&str> = boards.iter().map(|b| b.title.as_str()).collect();
+    assert_eq!(order, vec!["Un", "Deux", "Trois"]);
+    assert_eq!(pos(&b3), 2.0, "position restaurée");
 }
 
 #[test]

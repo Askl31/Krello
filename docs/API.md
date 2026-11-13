@@ -15,7 +15,7 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 |---|---|
 | `GET /boards?include_archived=` | liste |
 | `POST /boards` | `{title, description?, background?, calendar_id?, start_date?, deadline?}` |
-| `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade, undoable ⌘Z) · `DELETE /boards` → `{deleted: n}` = **tout supprimer** (boards archivés compris, pièces jointes purgées du disque, une seule entrée undo) |
+| `GET/PATCH/DELETE /boards/{id}` | lecture / modif partielle / suppression (cascade, undoable ⌘Z) · `DELETE /boards` → `{deleted: n}` = **tout supprimer** (boards archivés compris, pièces jointes purgées du disque, une seule entrée undo) · `pinned: bool` (épinglés en tête de sidebar) · `position: f64` (**ordre manuel** dans le groupe pinned, drag & drop sidebar) |
 | `POST /boards/{id}/duplicate` | copie profonde (conserve le statut modèle s'il y en a un, jamais `pinned`) |
 | `PATCH /boards/{id}/template` | `{is_template, template_description?}` — bascule board ↔ **modèle de board** (galerie « Nouveau board ») |
 | `GET /board-templates` | galerie des modèles de board (exclus de `GET /boards`) |
@@ -38,6 +38,7 @@ rejeté **422** par la couche de désérialisation axum (payload typés).
 | | |
 |---|---|
 | `GET/PATCH/DELETE /lists/{id}` · `GET /lists/{id}/count` | count → `{count, wip_exceeded}` |
+| `POST /lists/{id}/move` | `{direction: -1\|1}` — échange les positions avec la liste voisine active (gauche/droite dans le Kanban) ; aux bords = no-op ; archivées exclues ; undoable |
 | `POST /lists/{id}/duplicate` | duplie la liste : cartes non-archivées avec labels, checklists, champs personnalisés et pièces jointes (**fichiers dupliqués physiquement**) ; dépendances non copiées ; undoable en une opération |
 | `GET /cards/{id}` | détail complet : `{card, labels, checklists:[{…,items}], comments, attachments, custom_fields, dependencies_in/out, schedule}` |
 | `PATCH /cards/{id}` | tout champ partiel (title, description, start, due, due_complete, priority, is_milestone, duration_days, work_hours, pct_complete, task_type, units, hours_per_day, constraint_type/date, cost, archived…) · `reminders`: `[{"kind":"relative","offset":"15m"\|"30m"\|"1h"\|"2h"\|"1d"\|"2d"\|"1w"} \| {"kind":"absolute","at":"ISO"}]` — **rappels multiples** ; `[]` = aucun ; tout changement de `due`/`reminders` réarme les rappels (offset invalide ou date absurde → 400) · `time_spent_minutes`: **banque un incrément** (+n, jamais un remplacement) · `tracking_started_at`: `"ISO datetime"` = session de suivi en cours, **`""` = arrêter (banque l'écart depuis le début)** |

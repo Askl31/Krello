@@ -9,7 +9,7 @@ use crate::ids::new_id;
 use crate::models::*;
 use crate::time::now_rfc3339;
 use crate::undo::*;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 impl Service {
     pub fn create_list(&self, board_id: &str, c: CreateList) -> Result<List> {
@@ -107,6 +107,69 @@ impl Service {
                 before,
                 after: after.clone(),
             }],
+        });
+        self.emit(Event::ListUpdated {
+            board_id: after.board_id.clone(),
+            list_id: after.id.clone(),
+        });
+        Ok(after)
+    }
+
+    /// Move a list one slot left (dir = -1) or right (dir = +1) among the
+    /// board's non-archived lists: swaps positions with the immediate
+    /// neighbor. At the edges this is a no-op. Undoable (one entry).
+    pub fn move_list(&self, id: &str, dir: i8) -> Result<List> {
+        if dir != -1 && dir != 1 {
+            return Err(Error::Validation(format!(
+                "direction invalide: {dir} (attendus: -1 gauche, 1 droite)"
+            )));
+        }
+        let db = self.lock_db()?;
+        let list =
+            query_list(&db.conn, id)?.ok_or_else(|| Error::NotFound(format!("list {id}")))?;
+        let neighbor: Option<List> = if dir == -1 {
+            db.conn
+                .query_row(
+                    "SELECT * FROM lists WHERE board_id=?1 AND archived=0 AND position < ?2
+                     ORDER BY position DESC LIMIT 1",
+                    params![list.board_id, list.position],
+                    row_list,
+                )
+                .optional()?
+        } else {
+            db.conn
+                .query_row(
+                    "SELECT * FROM lists WHERE board_id=?1 AND archived=0 AND position > ?2
+                     ORDER BY position ASC LIMIT 1",
+                    params![list.board_id, list.position],
+                    row_list,
+                )
+                .optional()?
+        };
+        let Some(mut neighbor) = neighbor else {
+            return Ok(list); // bord: aucun voisin → no-op
+        };
+        let before = list.clone();
+        let neighbor_before = neighbor.clone();
+        let mut after = list;
+        let neighbor_pos = neighbor_before.position;
+        neighbor.position = after.position;
+        after.position = neighbor_pos;
+        update_list_row(&db.conn, &after)?;
+        update_list_row(&db.conn, &neighbor)?;
+        drop(db);
+        self.push_undo(UndoEntry {
+            label: format!("Déplacement de la liste « {} »", after.title),
+            actions: vec![
+                UndoAction::ListUpdated {
+                    before,
+                    after: after.clone(),
+                },
+                UndoAction::ListUpdated {
+                    before: neighbor_before,
+                    after: neighbor,
+                },
+            ],
         });
         self.emit(Event::ListUpdated {
             board_id: after.board_id.clone(),

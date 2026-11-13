@@ -25,6 +25,10 @@ impl Service {
             parse_date(d).ok_or_else(|| Error::Validation(format!("deadline invalide: {d}")))?;
         }
         let now = now_rfc3339();
+        let position = {
+            let db = self.lock_db()?;
+            db.conn.query_row("SELECT COALESCE(MAX(position), -1.0) + 1.0 FROM boards", [], |r| r.get(0))?
+        };
         let board = Board {
             id: new_id("board"),
             title: c.title.trim().to_string(),
@@ -39,6 +43,7 @@ impl Service {
             pinned_at: None,
             is_board_template: false,
             template_description: None,
+            position,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -64,9 +69,9 @@ impl Service {
     pub fn list_boards(&self, include_archived: bool) -> Result<Vec<Board>> {
         let db = self.lock_db()?;
         let sql = if include_archived {
-            "SELECT * FROM boards WHERE is_board_template = 0 ORDER BY pinned DESC, pinned_at DESC, created_at"
+            "SELECT * FROM boards WHERE is_board_template = 0 ORDER BY pinned DESC, position, created_at"
         } else {
-            "SELECT * FROM boards WHERE archived = 0 AND is_board_template = 0 ORDER BY pinned DESC, pinned_at DESC, created_at"
+            "SELECT * FROM boards WHERE archived = 0 AND is_board_template = 0 ORDER BY pinned DESC, position, created_at"
         };
         let mut stmt = db.conn.prepare_cached(sql)?;
         let boards = stmt
@@ -140,6 +145,9 @@ impl Service {
         if let Some(v) = u.pinned {
             after.pinned = v;
             after.pinned_at = if v { Some(now_rfc3339()) } else { None };
+        }
+        if let Some(v) = u.position {
+            after.position = v;
         }
         after.updated_at = now_updated();
         update_board_row(&db.conn, &after)?;

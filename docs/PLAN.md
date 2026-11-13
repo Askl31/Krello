@@ -16,7 +16,7 @@
 | Cartes | titre, description Markdown, position, couverture (couleur/pièce jointe), **labels**, dates début + échéance (avec heure, « terminée », complétée à), priorité (5 niveaux), **checklists** (progression %), **champs personnalisés** (texte/nombre/date/case/select), **pièces jointes** fichiers locaux (64 Mo max, vignette cover), commentaires, duplication, archivage, déplacement intra/inter-listes **et inter-boards**, filtres (texte/label/priorité/échéance/retard), recherche plein-texte **FTS5** (+ **corps des commentaires** via `comments_fts` ; recherche globale incluant archivées), **modèles de cartes** (`is_template`, badge, galerie par liste, instanciation copie profonde `keepFromSource` — dates/statut/commentaires jamais copiés, exclus de recherche/compteurs/vues de travail), **sous-cartes hiérarchiques** (`parent_id`, même liste que le parent, WBS `1.1`, Kanban indenté, duplication récursive, détachement si le parent est archivé/supprimé, cycle → 400), **rappels multiples** (relatifs `15m→1w` avant échéance ou date fixe absolue, dédupliqués par `<idx>|<due>`, réarmés quand due/rappels changent) |
 | Vues | **Kanban** (DnD pointer events, ghost, insertion par position, sous-cartes indentées sous leur parent), **Calendrier** (mois, drag pour replanifier l'échéance), **Timeline/Gantt** (barres CPM, jalons ◆, ligne aujourd'hui, zoom jour/semaine/mois, drag pour décaler, **flèches de dépendances**, chemin critique en rouge, marge affichée), **Table** (tri sur toutes les colonnes — WBS en tri naturel `1.2 < 1.10` — WBS, édition inline durée/charge/%), **Dashboard** (stats, répartitions, retards, jalons à venir, baselines + dérive, résumé IA), **Vue d'ensemble** (accueil : stats cross-board — retards, à venir 7 j, terminées 7 j —, rollup par tableau, activité récente) |
 | Automatisations | moteur « bot » local façon Butler (voir `docs/AUTOMATIONS.md`) : 13 déclencheurs (événementiels + `card_due_soon`/`card_due` + `button` + `scheduled_daily/weekly/monthly`, sweep chaque minute) ; conditions JSON riches ; 15 actions **dont cross-board** `copy`/`create_card`/`move` vers n'importe quel board, labels recréés par nom, templates `{{card.title}}`… ; cascade inter-board bornée (profondeur 4) ; journal d'exécution `automation_runs` + endpoints `/runs` + UI constructeur dans les paramètres |
-| UX | palette **⌘K** (boards, cartes, actions), **undo/redo ⌘Z/⇧⌘Z** (stack 100 opérations, redo), thèmes clair/sombre, toasts, WebSocket temps réel (maj incrémentale), raccourcis clavier |
+| UX | palette **⌘K** (boards, cartes, actions), **undo/redo ⌘Z/⇧⌘Z** (stack 100 opérations, redo), thèmes clair/sombre, toasts, WebSocket temps réel (maj incrémentale), raccourcis clavier, **réordonnancement manuel** : drag & drop des boards dans la sidebar (groupes épinglés séparés) et des listes dans le Kanban + menu liste « Déplacer à gauche/droite » |
 
 ### 1.2 Microsoft Project
 
@@ -94,11 +94,11 @@ foreign keys ON ; busy_timeout 5 s ; cache 8 Mo.
 
 ## 4. API (extrait, complet dans `docs/API.md`)
 
-`/api/v1/health` · `/boards` CRUD + `/duplicate` `/template` `/board-templates`
+`/api/v1/health` · `/boards` CRUD (+`position` manuel) + `/duplicate` `/template` `/board-templates`
 (+`/instantiate`) `/activity` `/cards` `/lists`
 `/labels` `/fields` `/dependencies` `/schedule` (GET/POST) `/baselines`
 `/automations` `/export?format=json|md|csv|ics` `/views` `/stats/global` ·
-`/lists/{id}` ·
+`/lists/{id}` + `/move` (gauche/droite) ·
 `/cards/{id}` + `/move` (+`parent_id`) `/duplicate` `/labels` `/cover` `/fields/{fid}`
 `/checklists` `/comments` `/attachments` · `/search` (+`include_comments`)
 `/import/trello`

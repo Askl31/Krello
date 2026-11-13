@@ -60,6 +60,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/lists/{id}", patch(update_list).delete(delete_list).get(get_list))
         .route("/lists/{id}/count", get(list_card_count))
         .route("/lists/{id}/duplicate", post(duplicate_list_route))
+        .route("/lists/{id}/move", post(move_list_route))
         // cards
         .route("/cards/{id}", get(get_card).patch(update_card).delete(delete_card))
         .route("/cards/{id}/move", post(move_card))
@@ -1078,12 +1079,28 @@ async fn run_backup_now(State(state): State<SharedState>) -> ApiResult<Response>
     Ok(ok_json(json!({ "file": path.to_string_lossy(), "size": size })))
 }
 
-// ---------- list duplicate ----------
+// ---------- list duplicate / move ----------
 
 async fn duplicate_list_route(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Response> {
     let service = state.service.clone();
     let list = blocking(move || service.duplicate_list(&id)).await?;
     Ok((StatusCode::CREATED, Json(list)).into_response())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct MoveListBody {
+    direction: i8,
+}
+
+async fn move_list_route(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+    Json(b): Json<MoveListBody>,
+) -> ApiResult<Response> {
+    let service = state.service.clone();
+    let list = blocking(move || service.move_list(&id, b.direction)).await?;
+    Ok(Json(list).into_response())
 }
 
 /// Native directory picker (Finder / Explorer). Only available when the server
