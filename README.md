@@ -139,7 +139,7 @@ calendrier replanifie.
 
 ## Tests
 
-144 tests (smoke + migrations, cartes/déplacements/**sous-cartes**/undo, CPM+calendriers+baselines, recherche
+150 tests (smoke + migrations, cartes/déplacements/**sous-cartes**/undo, CPM+calendriers+baselines, recherche
 (**commentaires**), import/export/automations, IA, intégration HTTP, **rappels multiples**,
 récurrence, tracking, duplication (listes + **arbres de sous-cartes** + **modèles de board**),
 garde Host, sauvegardes, **stats globales**) : `cargo test --workspace`.
@@ -160,6 +160,10 @@ garde Host, sauvegardes, **stats globales**) : `cargo test --workspace`.
   entrée d'undo) utilisé par le DnD ; indicateur de drop en `box-shadow` inset
   (`drop-before`/`drop-after`) — la drop-line insérée dans le flux flex décalait
   les colonnes pendant le drag et faisait rater le point de chute.
+- **FIX isolation des frappes clavier & validation quick-add** : la touche `Entrée`
+  dans le formulaire d'ajout rapide d'une carte ne déclenche plus l'ouverture de la
+  carte précédemment consultée (`e.stopPropagation()` sur le textarea + vérification
+  renforcée du focus dans `initBoardKeyNav`).
 - Schéma v13 ; 150 tests workspace verts.
 
 ### v0.2.0 — P0+P1 : favoris, rappels multiples, recherche commentaires, modèles de board, sous-cartes, vue d'ensemble

@@ -249,7 +249,13 @@ export function promptDialog(title, value = '', placeholder = '', opts = {}) {
     input.select();
     const submit = () => { const v = input.value.trim(); close(); resolve(v || null); };
     el.querySelector('[data-act=yes]').onclick = submit;
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        submit();
+      }
+    });
     el.querySelector('[data-act=no]').onclick = () => { close(); resolve(null); };
     const prev = el.closest('.modal-backdrop');
     const obs = new MutationObserver(() => {

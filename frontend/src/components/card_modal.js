@@ -928,7 +928,13 @@ export async function openCardModal(cardId, { onChange } = {}) {
       } catch (err) { toast(err.message, 'err'); }
     };
     el.querySelector('#cm-comment-add').onclick = addComment;
-    el.querySelector('#cm-comment').addEventListener('keydown', (e) => { if (e.key === 'Enter') addComment(); });
+    el.querySelector('#cm-comment').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        addComment();
+      }
+    });
     el.querySelector('#cm-comments').addEventListener('click', async (e) => {
       const del = e.target.closest('[data-del-com]');
       if (del) {
@@ -1077,7 +1083,13 @@ export async function openCardModal(cardId, { onChange } = {}) {
         } catch (err) { toast(err.message, 'err'); }
       };
       fm.el.querySelector('#ft-create').onclick = create;
-      titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
+      titleInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          create();
+        }
+      });
     });
 
     // --- IA

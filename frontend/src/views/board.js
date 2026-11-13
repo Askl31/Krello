@@ -689,16 +689,34 @@ async function quickAdd(listId, body) {
     if (!title) { cancel(); return; }
     form.remove();
     try {
-      await api.createCard(state.board.id, { title, list_id: listId });
+      const created = await api.createCard(state.board.id, { title, list_id: listId });
       await reload();
+      if (created?.id) {
+        focusedCardId = created.id;
+        applyFocusVisual();
+      }
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  form.querySelector('[data-submit]').onclick = submit;
-  form.querySelector('[data-cancel]').onclick = cancel;
+  form.querySelector('[data-submit]').onclick = (e) => {
+    e.stopPropagation();
+    submit();
+  };
+  form.querySelector('[data-cancel]').onclick = (e) => {
+    e.stopPropagation();
+    cancel();
+  };
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
-    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      submit();
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      cancel();
+    }
   });
 }
 
@@ -761,8 +779,18 @@ function initBoardKeyNav() {
 
   window.addEventListener('keydown', async (e) => {
     if (state.view !== 'board' || !state.board) return;
-    const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
-    if (inField) return;
+
+    // Ne pas intercepter les touches provenant d'un champ de saisie ou d'un formulaire
+    const isFormField = (node) => {
+      if (!node) return false;
+      if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(node.tagName)) return true;
+      if (typeof node.closest === 'function') {
+        return !!node.closest('input, textarea, select, button, .quick-add-form, [contenteditable="true"]');
+      }
+      return false;
+    };
+    if (isFormField(e.target) || isFormField(document.activeElement)) return;
+
     if (document.querySelector('.modal-backdrop, .palette-backdrop, .list-menu')) return;
 
     const lists = visibleLists();
@@ -923,8 +951,16 @@ function quickEditTileTitle(cardId) {
   };
 
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') finish(true);
-    if (e.key === 'Escape') finish(false);
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      finish(true);
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    }
   });
   input.addEventListener('blur', () => finish(true));
 }
