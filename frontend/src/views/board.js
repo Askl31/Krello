@@ -15,16 +15,24 @@ let focusedCardId = null;
 let keyNavAttached = false;
 let selection = new Set();
 let selEscAttached = false;
+let updateScrollArrows = () => {};
 
 export function renderBoard() {
   host = document.querySelector('.view');
+  if (!host) return;
+  host.classList.add('view-board');
   host.innerHTML = `
     <div class="filters" id="board-filters"></div>
-    <div class="board-scroller">
-      <div class="board" id="board"></div>
+    <div class="board-wrapper">
+      <button class="board-scroll-arrow left" aria-label="Défiler vers la gauche" title="Défiler vers la gauche">${icon('chevronLeft', { size: 20 })}</button>
+      <div class="board-scroller" id="board-scroller">
+        <div class="board" id="board"></div>
+      </div>
+      <button class="board-scroll-arrow right" aria-label="Défiler vers la droite" title="Défiler vers la droite">${icon('chevronRight', { size: 20 })}</button>
     </div>`;
   renderFilters();
   renderLists();
+  initBoardScroller();
   initBoardKeyNav();
   if (!selEscAttached) {
     selEscAttached = true;
@@ -37,6 +45,99 @@ export function renderBoard() {
   } else {
     document.querySelector('.translucent-copilot-card')?.remove();
   }
+}
+
+function initBoardScroller() {
+  const scroller = host?.querySelector('.board-scroller');
+  const arrowLeft = host?.querySelector('.board-scroll-arrow.left');
+  const arrowRight = host?.querySelector('.board-scroll-arrow.right');
+  if (!scroller || !arrowLeft || !arrowRight) return;
+
+  updateScrollArrows = () => {
+    if (!scroller.isConnected) return;
+    const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+    const canScrollLeft = scroller.scrollLeft > 10;
+    const canScrollRight = scroller.scrollLeft < maxScrollLeft - 10;
+    arrowLeft.classList.toggle('visible', canScrollLeft);
+    arrowRight.classList.toggle('visible', canScrollRight);
+  };
+
+  arrowLeft.onclick = (e) => {
+    e.preventDefault();
+    scroller.scrollBy({ left: -320, behavior: 'smooth' });
+  };
+
+  arrowRight.onclick = (e) => {
+    e.preventDefault();
+    scroller.scrollBy({ left: 320, behavior: 'smooth' });
+  };
+
+  scroller.addEventListener('scroll', updateScrollArrows, { passive: true });
+
+  // Traduction de la molette verticale en défilement horizontal (sauf si défilement interne dans une liste)
+  scroller.addEventListener('wheel', (e) => {
+    const listBody = e.target.closest('.list-body');
+    if (listBody && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      const canScrollUp = listBody.scrollTop > 1;
+      const canScrollDown = listBody.scrollTop + listBody.clientHeight < listBody.scrollHeight - 1;
+      if ((e.deltaY < 0 && canScrollUp) || (e.deltaY > 0 && canScrollDown)) {
+        return;
+      }
+    }
+
+    if (e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      e.preventDefault();
+      const delta = e.deltaMode === 1 ? e.deltaY * 33 : (e.deltaMode === 2 ? e.deltaY * scroller.clientWidth : e.deltaY);
+      scroller.scrollLeft += delta;
+      updateScrollArrows();
+    }
+  }, { passive: false });
+
+  // Panoramique par glisser-déposer sur le fond vide du tableau (Grab-to-pan)
+  let isPanning = false;
+  let startX = 0;
+  let scrollStart = 0;
+
+  scroller.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.card-tile, .list-head, .list-body, button, a, input, textarea, select, .quick-add-form, .list-menu, .iconbtn, .board-scroll-arrow')) {
+      return;
+    }
+    isPanning = true;
+    startX = e.clientX;
+    scrollStart = scroller.scrollLeft;
+    scroller.style.cursor = 'grabbing';
+    try { scroller.setPointerCapture(e.pointerId); } catch {}
+  });
+
+  scroller.addEventListener('pointermove', (e) => {
+    if (!isPanning) return;
+    const dx = e.clientX - startX;
+    scroller.scrollLeft = scrollStart - dx;
+    updateScrollArrows();
+  });
+
+  const endPan = (e) => {
+    if (isPanning) {
+      isPanning = false;
+      scroller.style.cursor = '';
+      try { scroller.releasePointerCapture(e.pointerId); } catch {}
+    }
+  };
+
+  scroller.addEventListener('pointerup', endPan);
+  scroller.addEventListener('pointercancel', endPan);
+
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(() => updateScrollArrows());
+    ro.observe(scroller);
+    const boardEl = host.querySelector('#board');
+    if (boardEl) ro.observe(boardEl);
+  }
+
+  updateScrollArrows();
+  requestAnimationFrame(updateScrollArrows);
+  setTimeout(updateScrollArrows, 150);
 }
 
 function renderTranslucentCopilot() {
@@ -232,6 +333,7 @@ function renderLists() {
   updateFilterBar();
   renderSelectionBar();
   applyFocusVisual();
+  updateScrollArrows();
 }
 
 /** Met à jour compteur + bouton reset sans reconstruire la barre (focus conservé). */
@@ -796,6 +898,8 @@ function initBoardKeyNav() {
     const lists = visibleLists();
     if (!lists.length) return;
 
+    const key = e.key.toLowerCase();
+
     // Raccourci d'aide '?'
     if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
       e.preventDefault();
@@ -803,8 +907,39 @@ function initBoardKeyNav() {
       return;
     }
 
-    // Si aucune carte n'est sélectionnée, initialiser sur la 1ère carte
+    // Si aucune carte n'est sélectionnée, faire défiler ou initialiser sur la 1ère carte
     if (!focusedCardId) {
+      const scroller = host?.querySelector('.board-scroller');
+      if (e.key === 'ArrowRight' || key === 'l') {
+        e.preventDefault();
+        if (scroller) scroller.scrollBy({ left: 320, behavior: 'smooth' });
+        return;
+      }
+      if (e.key === 'ArrowLeft' || key === 'h') {
+        e.preventDefault();
+        if (scroller) scroller.scrollBy({ left: -320, behavior: 'smooth' });
+        return;
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        if (scroller) scroller.scrollTo({ left: 0, behavior: 'smooth' });
+        return;
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        if (scroller) scroller.scrollTo({ left: scroller.scrollWidth, behavior: 'smooth' });
+        return;
+      }
+      if (e.key === 'PageDown') {
+        e.preventDefault();
+        if (scroller) scroller.scrollBy({ left: Math.round(scroller.clientWidth * 0.8), behavior: 'smooth' });
+        return;
+      }
+      if (e.key === 'PageUp') {
+        e.preventDefault();
+        if (scroller) scroller.scrollBy({ left: -Math.round(scroller.clientWidth * 0.8), behavior: 'smooth' });
+        return;
+      }
       for (const l of lists) {
         const cs = cardsOfList(l.id);
         if (cs.length) { focusedCardId = cs[0].id; applyFocusVisual(); break; }
@@ -818,8 +953,6 @@ function initBoardKeyNav() {
     const currentListIndex = lists.findIndex((l) => l.id === currentCard.list_id);
     const currentListCards = cardsOfList(currentCard.list_id);
     const currentCardIndex = currentListCards.findIndex((c) => c.id === currentCard.id);
-
-    const key = e.key.toLowerCase();
 
     // Haut (K ou ArrowUp)
     if (e.key === 'ArrowUp' || key === 'k') {
@@ -841,11 +974,20 @@ function initBoardKeyNav() {
     else if (e.key === 'ArrowLeft' || key === 'h') {
       e.preventDefault();
       if (currentListIndex > 0) {
-        const prevListCards = cardsOfList(lists[currentListIndex - 1].id);
-        if (prevListCards.length) {
-          const targetIdx = Math.min(currentCardIndex, prevListCards.length - 1);
-          focusedCardId = prevListCards[targetIdx].id;
-          applyFocusVisual();
+        let found = false;
+        for (let i = currentListIndex - 1; i >= 0; i--) {
+          const prevListCards = cardsOfList(lists[i].id);
+          if (prevListCards.length) {
+            const targetIdx = Math.min(currentCardIndex, prevListCards.length - 1);
+            focusedCardId = prevListCards[targetIdx].id;
+            applyFocusVisual();
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const scroller = host?.querySelector('.board-scroller');
+          if (scroller) scroller.scrollBy({ left: -320, behavior: 'smooth' });
         }
       }
     }
@@ -853,13 +995,43 @@ function initBoardKeyNav() {
     else if (e.key === 'ArrowRight' || key === 'l') {
       e.preventDefault();
       if (currentListIndex < lists.length - 1) {
-        const nextListCards = cardsOfList(lists[currentListIndex + 1].id);
-        if (nextListCards.length) {
-          const targetIdx = Math.min(currentCardIndex, nextListCards.length - 1);
-          focusedCardId = nextListCards[targetIdx].id;
-          applyFocusVisual();
+        let found = false;
+        for (let i = currentListIndex + 1; i < lists.length; i++) {
+          const nextListCards = cardsOfList(lists[i].id);
+          if (nextListCards.length) {
+            const targetIdx = Math.min(currentCardIndex, nextListCards.length - 1);
+            focusedCardId = nextListCards[targetIdx].id;
+            applyFocusVisual();
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const scroller = host?.querySelector('.board-scroller');
+          if (scroller) scroller.scrollBy({ left: 320, behavior: 'smooth' });
         }
       }
+    }
+    // Début / Fin / PageDown / PageUp
+    else if (e.key === 'Home') {
+      e.preventDefault();
+      const scroller = host?.querySelector('.board-scroller');
+      if (scroller) scroller.scrollTo({ left: 0, behavior: 'smooth' });
+    }
+    else if (e.key === 'End') {
+      e.preventDefault();
+      const scroller = host?.querySelector('.board-scroller');
+      if (scroller) scroller.scrollTo({ left: scroller.scrollWidth, behavior: 'smooth' });
+    }
+    else if (e.key === 'PageDown') {
+      e.preventDefault();
+      const scroller = host?.querySelector('.board-scroller');
+      if (scroller) scroller.scrollBy({ left: Math.round(scroller.clientWidth * 0.8), behavior: 'smooth' });
+    }
+    else if (e.key === 'PageUp') {
+      e.preventDefault();
+      const scroller = host?.querySelector('.board-scroller');
+      if (scroller) scroller.scrollBy({ left: -Math.round(scroller.clientWidth * 0.8), behavior: 'smooth' });
     }
     // Entrée : ouvrir la carte
     else if (e.key === 'Enter') {
@@ -982,6 +1154,8 @@ export function openShortcutsDialog() {
             <div class="label">Navigation Kanban</div>
             <div style="display:flex;flex-direction:column;gap:9px">
               <div style="display:flex;align-items:center;justify-content:space-between"><span>Naviguer entre cartes</span> <div><span class="kbd">← ↓ ↑ →</span> <span class="muted" style="font-size:11px">ou</span> <span class="kbd">HJKL</span></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Dérouler le tableau</span> <div><span class="kbd">Molette</span> <span class="muted" style="font-size:11px">ou</span> <span class="kbd">Glisser</span></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><span>Début / Fin de tableau</span> <div><span class="kbd">Origine</span> <span class="kbd">Fin</span> <span class="muted" style="font-size:11px">ou</span> <span class="kbd">⇞ ⇟</span></div></div>
               <div style="display:flex;align-items:center;justify-content:space-between"><span>Ouvrir la carte</span> <span class="kbd">Entrée ↵</span></div>
               <div style="display:flex;align-items:center;justify-content:space-between"><span>Terminer / réouvrir</span> <span class="kbd">Espace</span></div>
               <div style="display:flex;align-items:center;justify-content:space-between"><span>Édition rapide du titre</span> <span class="kbd">E</span></div>
@@ -1029,6 +1203,7 @@ async function reload({ refetch = true } = {}) {
       scroller.scrollLeft = scrollLeft;
       scroller.scrollTop = scrollTop;
     }
+    updateScrollArrows();
   } else {
     renderBoard();
   }
